@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import clsx from 'clsx';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
   Cloud,
@@ -36,6 +37,7 @@ import { parseOpenWithFiles } from '@/helpers/openWith';
 import BookCover from '@/components/BookCover';
 import Spinner from '@/components/Spinner';
 import { Toast } from '@/components/Toast';
+import WindowButtons from '@/components/WindowButtons';
 import { useBooksSync } from './hooks/useBooksSync';
 import { useBookTransferActions } from './hooks/useBookTransferActions';
 
@@ -62,6 +64,8 @@ const LibraryPage = () => {
   const [query, setQuery] = useState('');
   const [importing, setImporting] = useState(false);
   const [busyBookHash, setBusyBookHash] = useState<string | null>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  const showWindowControls = !!appService?.hasWindowBar && !appService.hasTrafficLight;
 
   useTheme({ systemUIVisible: true, appThemeColor: 'base-100' });
   useTransferQueue(libraryLoaded);
@@ -220,13 +224,19 @@ const LibraryPage = () => {
 
   return (
     <main className='bg-base-100 text-base-content full-height flex min-h-0 flex-col'>
-      <header className='border-base-300 flex min-h-16 shrink-0 items-center gap-3 border-b px-4 sm:px-6'>
-        <div className='flex min-w-0 items-center gap-2'>
+      <header
+        ref={headerRef}
+        className={clsx(
+          'border-base-300 relative flex min-h-16 shrink-0 select-none items-center gap-3 border-b ps-4 sm:ps-6',
+          showWindowControls ? 'pe-36 sm:pe-40' : 'pe-4 sm:pe-6',
+        )}
+      >
+        <div className='flex min-w-0 shrink-0 items-center gap-2'>
           <BookOpen aria-hidden='true' className='h-5 w-5 shrink-0' />
           <h1 className='truncate text-lg font-semibold'>Readest</h1>
         </div>
 
-        <label className='bg-base-200 focus-within:ring-primary ms-auto flex h-9 min-w-0 max-w-md flex-1 items-center gap-2 rounded px-3 focus-within:ring-1'>
+        <label className='exclude-title-bar-mousedown bg-base-200 focus-within:ring-primary mx-auto flex h-9 min-w-0 max-w-md flex-1 items-center gap-2 rounded px-3 focus-within:ring-1'>
           <Search aria-hidden='true' className='h-4 w-4 shrink-0 opacity-60' />
           <input
             value={query}
@@ -237,40 +247,48 @@ const LibraryPage = () => {
           />
         </label>
 
-        {user && (
+        <div className='exclude-title-bar-mousedown flex shrink-0 items-center gap-2'>
+          {user && (
+            <button
+              type='button'
+              className='btn btn-ghost btn-square h-9 min-h-9 w-9'
+              title={_('Sync')}
+              aria-label={_('Sync')}
+              onClick={() => void pullLibrary(true, true)}
+            >
+              <RefreshCw className='h-4 w-4' />
+            </button>
+          )}
           <button
             type='button'
             className='btn btn-ghost btn-square h-9 min-h-9 w-9'
-            title={_('Sync')}
-            aria-label={_('Sync')}
-            onClick={() => void pullLibrary(true, true)}
+            title={_('Import Books')}
+            aria-label={_('Import Books')}
+            onClick={() => void handleImport()}
+            disabled={importing || !appService}
           >
-            <RefreshCw className='h-4 w-4' />
+            {importing ? (
+              <LoaderCircle className='h-4 w-4 animate-spin' />
+            ) : (
+              <Upload className='h-4 w-4' />
+            )}
           </button>
+          <button
+            type='button'
+            className='btn btn-ghost btn-square h-9 min-h-9 w-9'
+            title={user ? _('Log Out') : _('Log In')}
+            aria-label={user ? _('Log Out') : _('Log In')}
+            onClick={() => (user ? void logout() : navigateToLogin(router))}
+          >
+            {user ? <LogOut className='h-4 w-4' /> : <LogIn className='h-4 w-4' />}
+          </button>
+        </div>
+        {showWindowControls && (
+          <WindowButtons
+            className='absolute end-4 top-1/2 z-30 -translate-y-1/2 sm:end-6'
+            headerRef={headerRef}
+          />
         )}
-        <button
-          type='button'
-          className='btn btn-ghost btn-square h-9 min-h-9 w-9'
-          title={_('Import Books')}
-          aria-label={_('Import Books')}
-          onClick={() => void handleImport()}
-          disabled={importing || !appService}
-        >
-          {importing ? (
-            <LoaderCircle className='h-4 w-4 animate-spin' />
-          ) : (
-            <Upload className='h-4 w-4' />
-          )}
-        </button>
-        <button
-          type='button'
-          className='btn btn-ghost btn-square h-9 min-h-9 w-9'
-          title={user ? _('Log Out') : _('Log In')}
-          aria-label={user ? _('Log Out') : _('Log In')}
-          onClick={() => (user ? void logout() : navigateToLogin(router))}
-        >
-          {user ? <LogOut className='h-4 w-4' /> : <LogIn className='h-4 w-4' />}
-        </button>
       </header>
 
       {!libraryLoaded ? (

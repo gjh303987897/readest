@@ -116,9 +116,19 @@ foliate-fxl {
   animation: scaleUpAndDown 0.3s ease forwards;
 }
 
+.window-buttons {
+  @apply border-base-300/70 bg-base-200/45 gap-0.5 rounded-md border p-0.5;
+}
+
 .window-button {
-  @apply inline-flex h-6 w-6 items-center justify-center rounded-full;
-  @apply transform transition duration-200 ease-in-out hover:scale-105;
+  @apply text-base-content/70 hover:bg-base-300/80 hover:text-base-content active:bg-base-300;
+  @apply relative inline-flex h-8 w-9 shrink-0 items-center justify-center rounded-[5px];
+  @apply transition-colors duration-150 ease-out;
+  @apply focus-visible:ring-base-content/25 focus-visible:ring-2 focus-visible:ring-inset focus-visible:outline-none;
+}
+
+.window-button-close {
+  @apply hover:bg-error hover:text-error-content active:bg-error;
 }
 
 .rounded-window {
@@ -468,23 +478,16 @@ foliate-fxl {
     inset 0 0 0 3px #6396e7;
 }
 
-.window-button {
-  position: relative;
-}
-
 .window-button::before {
   content: '';
   position: absolute;
-  inset: -8px;
+  inset: 0;
 }
 
-/* The desktop trio sits 8px apart, so -8px is the widest halo that still tiles
-   exactly — any more and a button would swallow its neighbor's edge. When
-   close is rendered alone (the reader header on mobile: minimize and maximize
-   need a window bar) there is no neighbor, so it takes the full 44px target
-   the tap deserves (#5401). */
+/* The reader can render close by itself on mobile. Expand that single button
+   to a 44px touch target without making adjacent desktop controls overlap. */
 .window-button:only-child::before {
-  inset: -10px;
+  inset: -6px;
 }
 
 input[type='range'].slider-input {
