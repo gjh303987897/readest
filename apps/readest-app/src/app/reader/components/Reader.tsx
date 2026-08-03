@@ -1,0 +1,122 @@
+'use client';
+
+import clsx from 'clsx';
+import * as React from 'react';
+import { useEffect, Suspense } from 'react';
+import { useRouter } from 'next/navigation';
+
+import { useEnv } from '@/context/EnvContext';
+import { useTheme } from '@/hooks/useTheme';
+import { useLibrary } from '@/hooks/useLibrary';
+import { useThemeStore } from '@/store/themeStore';
+import { useReaderStore } from '@/store/readerStore';
+import { useSidebarStore } from '@/store/sidebarStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { useDeviceControlStore } from '@/store/deviceStore';
+import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
+import { useScreenBrightness } from '@/app/reader/hooks/useScreenBrightness';
+import { eventDispatcher } from '@/utils/event';
+import { interceptWindowOpen } from '@/utils/open';
+import { mountAdditionalFonts } from '@/styles/fonts';
+import { isTauriAppPlatform } from '@/services/environment';
+import { getSysFontsList, setSystemUIVisibility } from '@/utils/bridge';
+import { Toast } from '@/components/Toast';
+import { getLocale } from '@/utils/misc';
+import { initDayjs } from '@/utils/time';
+import ReaderContent from './ReaderContent';
+
+const Reader: React.FC<{ ids?: string }> = ({ ids }) => {
+  const router = useRouter();
+  const { appService } = useEnv();
+  const { settings } = useSettingsStore();
+  const { libraryLoaded } = useLibrary();
+  const { sideBarBookKey } = useSidebarStore();
+  const { hoveredBookKey } = useReaderStore();
+  const { showSystemUI, dismissSystemUI } = useThemeStore();
+  const { acquireBackKeyInterception, releaseBackKeyInterception } = useDeviceControlStore();
+  const { isSideBarVisible, isSideBarPinned } = useSidebarStore();
+  const { getIsSideBarVisible, setSideBarVisible } = useSidebarStore();
+  const { isDarkMode, systemUIAlwaysHidden, isRoundedWindow } = useThemeStore();
+
+  useTheme({ systemUIVisible: settings.alwaysShowStatusBar, appThemeColor: 'base-100' });
+  useScreenWakeLock(settings.screenWakeLock, appService?.hasWindow);
+  useScreenBrightness();
+
+  useEffect(() => {
+    mountAdditionalFonts(document);
+    interceptWindowOpen();
+    if (isTauriAppPlatform()) {
+      setTimeout(getSysFontsList, 3000);
+    }
+    initDayjs(getLocale());
+  }, []);
+
+  const handleKeyDown = (event: CustomEvent) => {
+    if (event.detail.keyName === 'Back') {
+      const { hoveredBookKey, setHoveredBookKey } = useReaderStore.getState();
+      if (hoveredBookKey) {
+        setHoveredBookKey('');
+        (document.activeElement as HTMLElement)?.blur();
+      } else if (getIsSideBarVisible() && !isSideBarPinned) {
+        setSideBarVisible(false);
+      } else {
+        eventDispatcher.dispatch('close-reader');
+        router.back();
+      }
+      return true;
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    if (!appService?.isAndroidApp) return;
+    acquireBackKeyInterception();
+    return () => {
+      releaseBackKeyInterception();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appService?.isAndroidApp]);
+
+  useEffect(() => {
+    if (appService?.isAndroidApp) {
+      eventDispatcher.onSync('native-key-down', handleKeyDown);
+    }
+    return () => {
+      if (appService?.isAndroidApp) {
+        eventDispatcher.offSync('native-key-down', handleKeyDown);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appService?.isAndroidApp, sideBarBookKey, isSideBarPinned, isSideBarVisible]);
+
+  useEffect(() => {
+    if (!appService?.isMobileApp) return;
+    const systemUIVisible = !!hoveredBookKey || settings.alwaysShowStatusBar;
+    const visible = !!(systemUIVisible && !systemUIAlwaysHidden);
+    setSystemUIVisibility({ visible, darkMode: isDarkMode });
+    if (visible) {
+      showSystemUI();
+    } else {
+      dismissSystemUI();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoveredBookKey]);
+
+  return libraryLoaded && settings.globalReadSettings ? (
+    <div
+      className={clsx(
+        'reader-page bg-base-100 text-base-content full-height select-none overflow-hidden',
+        appService?.hasRoundedWindow && isRoundedWindow && 'window-border rounded-window',
+      )}
+    >
+      <Suspense fallback={<div className='full-height'></div>}>
+        <ReaderContent ids={ids} settings={settings} />
+        <Toast />
+      </Suspense>
+    </div>
+  ) : (
+    <div className='full-height bg-base-100'></div>
+  );
+};
+
+export default Reader;

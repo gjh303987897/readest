@@ -1,0 +1,301 @@
+import { useEffect } from 'react';
+import { useReaderStore } from '@/store/readerStore';
+import { isTauriAppPlatform } from '@/services/environment';
+import { useSidebarStore } from '@/store/sidebarStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { useBookDataStore } from '@/store/bookDataStore';
+import { tauriHandleClose, tauriHandleToggleFullScreen, tauriQuitApp } from '@/utils/window';
+import { eventDispatcher } from '@/utils/event';
+import { setShortcutsDialogVisible } from '@/components/KeyboardShortcutsHelp';
+import { MAX_ZOOM_LEVEL, MIN_ZOOM_LEVEL, ZOOM_STEP } from '@/services/constants';
+import { getScrollGapAttr } from '@/utils/webtoon';
+import { extendSelectionFromContents, KeyModifiers } from '@/utils/sel';
+import { getReadingAreaRect, keyboardTurnDirection } from './useAutoPageTurn';
+import { viewPagination } from './usePagination';
+import useShortcuts from '@/hooks/useShortcuts';
+import useBooksManager from './useBooksManager';
+
+interface UseBookShortcutsProps {
+  sideBarBookKey: string | null;
+  bookKeys: string[];
+}
+
+const useBookShortcuts = ({ sideBarBookKey, bookKeys }: UseBookShortcutsProps) => {
+  const { getView, getViewSettings, setViewSettings } = useReaderStore();
+  const { toggleSideBar, setSideBarBookKey } = useSidebarStore();
+  const { setSettingsDialogOpen } = useSettingsStore();
+  const { getBookData } = useBookDataStore();
+  const { getNextBookKey } = useBooksManager();
+  const viewSettings = getViewSettings(sideBarBookKey ?? '');
+  const fontSize = viewSettings?.defaultFontSize ?? 16;
+  const lineHeight = viewSettings?.lineHeight ?? 1.6;
+  const distance = fontSize * lineHeight * 3;
+
+  const toggleScrollMode = () => {
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    if (viewSettings && sideBarBookKey) {
+      viewSettings.scrolled = !viewSettings.scrolled;
+      // Webtoon Mode requires scrolled flow; leaving scrolled exits Webtoon Mode
+      // and restores the default page gap (mirror the View menu's behavior).
+      if (!viewSettings.scrolled && viewSettings.webtoonMode) {
+        viewSettings.webtoonMode = false;
+        getView(sideBarBookKey)?.renderer.setAttribute('scroll-gap', getScrollGapAttr(false));
+      }
+      setViewSettings(sideBarBookKey, viewSettings!);
+      const flowMode = viewSettings.scrolled ? 'scrolled' : 'paginated';
+      getView(sideBarBookKey)?.renderer.setAttribute('flow', flowMode);
+    }
+    return true;
+  };
+
+  const switchSideBar = () => {
+    if (sideBarBookKey) setSideBarBookKey(getNextBookKey(sideBarBookKey));
+  };
+
+  // Standard desktop selection shortcuts (#4728). After a selection the reader
+  // container holds focus, so Shift+←/→ keystrokes land here in the parent (not
+  // the iframe). Extend the iframe selection ourselves; for keys forwarded from
+  // a focused iframe (the browser already extended natively) just report that a
+  // selection exists. Returning true stops the page-turn shortcut from firing.
+  const adjustTextSelection = (event?: KeyboardEvent | MessageEvent) => {
+    const isNative = event instanceof KeyboardEvent;
+    const src: KeyModifiers | undefined = isNative ? event : event?.data;
+    if (!src?.key) return false;
+    const view = getView(sideBarBookKey ?? '');
+    const contents = view?.renderer?.getContents?.() ?? [];
+    const extended = extendSelectionFromContents(contents, src, isNative);
+    // Keyboard turn-on-cross (#4741): when the extended selection's focus leaves
+    // the visible page in paginated mode, turn the page so the growing selection
+    // stays in view. Only for keys we extended ourselves (the native parent
+    // path); the focused-iframe path lets the browser scroll the focus in.
+    if (extended && isNative && !getViewSettings(sideBarBookKey ?? '')?.scrolled) {
+      const dir = keyboardTurnDirection(contents, getReadingAreaRect(sideBarBookKey ?? ''));
+      if (dir === 'next') view?.next();
+      else if (dir === 'prev') view?.prev();
+    }
+    return extended;
+  };
+
+  const goLeft = () => {
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    viewPagination(getView(sideBarBookKey), viewSettings, 'left', 'pan', distance);
+  };
+
+  const goRight = () => {
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    viewPagination(getView(sideBarBookKey), viewSettings, 'right', 'pan', distance);
+  };
+
+  const goUp = (event?: KeyboardEvent | MessageEvent) => {
+    const view = getView(sideBarBookKey);
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    if (view?.renderer.scrolled && event instanceof MessageEvent) return;
+    viewPagination(view, viewSettings, 'up', 'pan', distance);
+  };
+
+  const goDown = (event?: KeyboardEvent | MessageEvent) => {
+    const view = getView(sideBarBookKey);
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    if (view?.renderer.scrolled && event instanceof MessageEvent) return;
+    viewPagination(view, viewSettings, 'down', 'pan', distance);
+  };
+
+  const goPrevSection = () => {
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    viewPagination(getView(sideBarBookKey), viewSettings, 'up', 'section');
+  };
+
+  const goNextSection = () => {
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    viewPagination(getView(sideBarBookKey), viewSettings, 'down', 'section');
+  };
+
+  const goLeftSection = () => {
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    viewPagination(getView(sideBarBookKey), viewSettings, 'left', 'section');
+  };
+
+  const goRightSection = () => {
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    viewPagination(getView(sideBarBookKey), viewSettings, 'right', 'section');
+  };
+
+  const goPrev = () => {
+    getView(sideBarBookKey)?.prev(distance);
+  };
+
+  const goNext = () => {
+    getView(sideBarBookKey)?.next(distance);
+  };
+
+  const goBack = () => {
+    getView(sideBarBookKey)?.history.back();
+  };
+
+  const goHalfPageDown = () => {
+    const view = getView(sideBarBookKey);
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    if (view && viewSettings && viewSettings.scrolled) {
+      view.next(view.renderer.size / 2);
+    }
+  };
+
+  const goHalfPageUp = () => {
+    const view = getView(sideBarBookKey);
+    const viewSettings = getViewSettings(sideBarBookKey ?? '');
+    if (view && viewSettings && viewSettings.scrolled) {
+      view.prev(view.renderer.size / 2);
+    }
+  };
+
+  const goForward = () => {
+    getView(sideBarBookKey)?.history.forward();
+  };
+
+  const reloadPage = () => {
+    window.location.reload();
+  };
+
+  const toggleFullscreen = async () => {
+    if (isTauriAppPlatform()) {
+      await tauriHandleToggleFullScreen();
+    }
+  };
+
+  const closeWindow = async () => {
+    if (isTauriAppPlatform()) {
+      await tauriHandleClose();
+    }
+  };
+
+  const quitApp = async () => {
+    // on web platform use browser's default shortcut to close the tab
+    if (isTauriAppPlatform()) {
+      await tauriQuitApp();
+    }
+  };
+
+  const showSearchBar = () => {
+    setTimeout(() => {
+      eventDispatcher.dispatch('search-term', { term: null, bookKey: sideBarBookKey });
+    }, 100);
+  };
+
+  const applyZoomLevel = (zoomLevel: number) => {
+    if (!sideBarBookKey) return;
+    const view = getView(sideBarBookKey);
+    const bookData = getBookData(sideBarBookKey);
+    const viewSettings = getViewSettings(sideBarBookKey)!;
+    if (bookData?.isFixedLayout) {
+      view?.renderer.setAttribute('scale-factor', zoomLevel);
+      viewSettings!.zoomLevel = zoomLevel;
+      setViewSettings(sideBarBookKey, viewSettings!);
+    }
+  };
+
+  const zoomInFactor = (factor = 1.0) => {
+    if (!sideBarBookKey) return;
+    const viewSettings = getViewSettings(sideBarBookKey)!;
+    const zoomLevel = viewSettings!.zoomLevel + ZOOM_STEP * factor;
+    applyZoomLevel(Math.min(zoomLevel, MAX_ZOOM_LEVEL));
+  };
+
+  const zoomOutFactor = (factor = 1.0) => {
+    if (!sideBarBookKey) return;
+    const viewSettings = getViewSettings(sideBarBookKey)!;
+    const zoomLevel = viewSettings!.zoomLevel - ZOOM_STEP * factor;
+    applyZoomLevel(Math.max(zoomLevel, MIN_ZOOM_LEVEL));
+  };
+
+  const zoomIn = () => {
+    zoomInFactor();
+  };
+
+  const zoomOut = () => {
+    zoomOutFactor();
+  };
+
+  const handleZoomIn = (event: CustomEvent) => {
+    const factor = event.detail?.factor || 1.0;
+    zoomInFactor(factor);
+  };
+
+  const handleZoomOut = (event: CustomEvent) => {
+    const factor = event.detail?.factor || 1.0;
+    zoomOutFactor(factor);
+  };
+
+  const resetZoom = () => {
+    if (!sideBarBookKey) return;
+    applyZoomLevel(100);
+  };
+
+  const toggleToolbar = () => {
+    if (!sideBarBookKey) return;
+    // Don't intercept Enter when a button is focused (let native click fire)
+    const active = document.activeElement;
+    if (active && active.tagName === 'BUTTON') return;
+    const { hoveredBookKey, setHoveredBookKey } = useReaderStore.getState();
+    setHoveredBookKey(hoveredBookKey === sideBarBookKey ? '' : sideBarBookKey);
+  };
+
+  const handlePinchZoom = (event: CustomEvent) => {
+    const zoomLevel = event.detail?.zoomLevel;
+    if (zoomLevel != null) {
+      applyZoomLevel(zoomLevel);
+    }
+  };
+
+  useEffect(() => {
+    eventDispatcher.on('zoom-in', handleZoomIn);
+    eventDispatcher.on('zoom-out', handleZoomOut);
+    eventDispatcher.on('reset-zoom', resetZoom);
+    eventDispatcher.on('pinch-zoom', handlePinchZoom);
+    return () => {
+      eventDispatcher.off('zoom-in', handleZoomIn);
+      eventDispatcher.off('zoom-out', handleZoomOut);
+      eventDispatcher.off('reset-zoom', resetZoom);
+      eventDispatcher.off('pinch-zoom', handlePinchZoom);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sideBarBookKey]);
+
+  useShortcuts(
+    {
+      // Listed first so an active selection intercepts Shift+←/→ before the
+      // page-navigation actions below can turn the page (#4728).
+      onAdjustTextSelection: adjustTextSelection,
+      onSwitchSideBar: switchSideBar,
+      onToggleSideBar: toggleSideBar,
+      onToggleScrollMode: toggleScrollMode,
+      onToggleToolbar: toggleToolbar,
+      onOpenFontLayoutSettings: () => setSettingsDialogOpen(true),
+      onShowSearchBar: showSearchBar,
+      onToggleFullscreen: toggleFullscreen,
+      onReloadPage: reloadPage,
+      onCloseWindow: closeWindow,
+      onQuitApp: quitApp,
+      onGoLeft: goLeft,
+      onGoRight: goRight,
+      onGoUp: goUp,
+      onGoDown: goDown,
+      onGoPrev: goPrev,
+      onGoNext: goNext,
+      onGoHalfPageDown: goHalfPageDown,
+      onGoHalfPageUp: goHalfPageUp,
+      onGoPrevSection: goPrevSection,
+      onGoNextSection: goNextSection,
+      onGoLeftSection: goLeftSection,
+      onGoRightSection: goRightSection,
+      onGoBack: goBack,
+      onGoForward: goForward,
+      onZoomIn: zoomIn,
+      onZoomOut: zoomOut,
+      onResetZoom: resetZoom,
+      onOpenShortcutsHelp: () => setShortcutsDialogVisible(true),
+    },
+    [sideBarBookKey, bookKeys],
+  );
+};
+
+export default useBookShortcuts;

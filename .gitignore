@@ -1,0 +1,132 @@
+# Dependencies and package-manager state
+node_modules/
+.pnp
+.pnp.*
+.pnpm-store/
+.npm/
+.yarn/*
+!.yarn/patches/
+!.yarn/plugins/
+!.yarn/releases/
+!.yarn/sdks/
+!.yarn/versions/
+
+# Local environment overrides and secrets
+.env.local
+.env.*.local
+docker/.env
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+certs/
+private_keys/
+
+# JavaScript and web build output
+.next/
+out/
+dist/
+build/
+.open-next/
+.turbo/
+.cache/
+.vercel/
+.wrangler/
+*.tsbuildinfo
+next-env.d.ts
+.eslintcache
+.stylelintcache
+
+# Test and benchmark output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+.test-sandbox-node/
+.vitest-attachments/
+bench/results.jsonl
+
+# Rust and Tauri generated output
+target/
+**/src-tauri/gen/
+**/gen/schemas/
+*.dSYM/
+*.apk
+*.aab
+*.ipa
+*.dmg
+*.msi
+*.msix
+
+# Native toolchain and signing state
+.gradle/
+local.properties
+DerivedData/
+xcuserdata/
+*.xcuserstate
+Entitlements*.plist
+tauri.*.conf.json
+tauri.*.local.json
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Logs, temporary files, and OS metadata
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*.pid
+*.dmp
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE-specific user state; shared .vscode and .zed settings are versioned
+.idea/
+.fleet/
+*.iml
+*.suo
+*.user
+
+# Local automation and agent state
+.agents/
+.claude/
+.codex/
+.context/
+.gstack/
+.playwright-mcp/
+
+# Generated application assets
+**/public/vendor/
+**/public/sw.js
+**/public/workbox-*.js
+**/public/fallback-*.js
+**/public/swe-worker-*.js
+
+# Release-tool output
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+fastlane/test_output/
+fastlane/metadata/android/en-US/changelogs/
+*.koplugin.zip
+
+# Nix build links
+result
+result-*

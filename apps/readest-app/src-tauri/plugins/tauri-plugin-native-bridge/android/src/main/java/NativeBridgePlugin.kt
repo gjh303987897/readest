@@ -1,0 +1,955 @@
+package com.readest.native_bridge
+
+import android.Manifest
+import android.app.Activity
+import android.app.Application
+import android.os.Bundle
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.util.Log
+import android.os.Build
+import android.os.Environment
+import android.provider.Settings
+import android.provider.DocumentsContract
+import android.view.View
+import android.view.KeyEvent
+import android.view.WindowInsets
+import android.view.WindowManager
+import android.view.WindowInsetsController
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.Rect
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Handler
+import android.os.Looper
+import android.util.Base64
+import android.view.PixelCopy
+import android.webkit.WebView
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.graphics.fonts.SystemFonts
+import android.graphics.fonts.Font
+import androidx.core.view.WindowCompat
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import app.tauri.annotation.Command
+import app.tauri.annotation.InvokeArg
+import app.tauri.annotation.Permission
+import app.tauri.annotation.TauriPlugin
+import app.tauri.plugin.JSObject
+import app.tauri.plugin.JSArray
+import app.tauri.plugin.Plugin
+import app.tauri.plugin.Invoke
+import java.io.*
+import kotlin.math.abs
+import kotlinx.coroutines.*
+
+@InvokeArg
+class CopyURIRequestArgs {
+    var uri: String? = null
+    var dst: String? = null
+}
+
+@InvokeArg
+class SetSystemUIVisibilityRequestArgs {
+    var visible: Boolean? = false
+    var darkMode: Boolean? = false
+}
+
+@InvokeArg
+class InterceptKeysRequestArgs {
+    var volumeKeys: Boolean? = null
+    var backKey: Boolean? = null
+    var pageTurnerKeys: Boolean? = null
+    var learnMode: Boolean? = null
+}
+
+@InvokeArg
+class LockScreenOrientationRequestArgs {
+    var orientation: String? = null
+}
+
+@InvokeArg
+class SetScreenBrightnessRequestArgs {
+    var brightness: Double? = null // 0.0 to 1.0
+}
+
+@InvokeArg
+class CaptureWebviewRegionArgs {
+    var x: Float = 0f
+    var y: Float = 0f
+    var width: Float = 0f
+    var height: Float = 0f
+}
+
+interface KeyDownInterceptor {
+    fun interceptVolumeKeys(enabled: Boolean)
+    fun interceptBackKey(enabled: Boolean)
+    fun interceptPageTurnerKeys(enabled: Boolean)
+    fun setKeyLearnMode(enabled: Boolean)
+}
+
+@TauriPlugin(
+  permissions = [
+    Permission(strings = [Manifest.permission.MANAGE_EXTERNAL_STORAGE], alias = "manageStorage"),
+  ]
+)
+class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
+    private val implementation = NativeBridge()
+    private var webViewRef: WebView? = null
+    // Scope for offloading blocking @Command I/O from the plugin command thread.
+    // Cancelled in onDestroy so in-flight work can't resolve into — or leak —
+    // a dead Activity.
+    private val pluginScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    private var sensorManager: SensorManager? = null
+    private var ambientLightListening = false
+    private var lastEmittedLux: Float = Float.NaN
+    private val ambientLightListener = object : SensorEventListener {
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
+        override fun onSensorChanged(event: SensorEvent?) {
+            val lux = event?.values?.getOrNull(0) ?: return
+            // Skip tiny noise so JS hysteresis is not flooded (~SENSOR_DELAY_NORMAL).
+            if (!lastEmittedLux.isNaN() && abs(lux - lastEmittedLux) < 0.5f) return
+            lastEmittedLux = lux
+            val payload = JSObject()
+            payload.put("lux", lux.toDouble())
+            // Deliberately NOT emitOrQueue: that queue is for one-shot events
+            // like shared-intent that must survive until JS registers. This is
+            // a continuous stream, so a sample nobody is listening for is
+            // worthless and queueing it would grow without bound whenever the
+            // sensor outlives the listener (e.g. the WebView renderer dies).
+            triggerEvent("ambient-light", payload)
+        }
+    }
+
+    override fun onDestroy() {
+        stopAmbientLightUpdatesInternal()
+        pluginScope.cancel()
+        activity.application.unregisterActivityLifecycleCallbacks(lifecycleCallbacks)
+        instance = null
+    }
+
+    companion object {
+        private const val REQUEST_MANAGE_STORAGE = 1001
+        private const val FOLDER_PICKER_REQUEST_CODE = 1002
+        var pendingInvoke: Invoke? = null
+        var pendingFolderPickerInvoke: Invoke? = null
+        private var instance: NativeBridgePlugin? = null
+        fun getInstance(): NativeBridgePlugin? = instance
+    }
+
+    override fun load(webView: WebView) {
+        instance = this
+        webViewRef = webView
+        super.load(webView)
+        activity.application.registerActivityLifecycleCallbacks(lifecycleCallbacks)
+        handleIntent(activity.intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        handleIntent(intent)
+    }
+
+    // Tauri declares Plugin.onResume but never registers the observer that calls it.
+    private val lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityResumed(resumed: Activity) {
+            if (resumed === activity) releaseBrightnessOverride()
+        }
+
+        override fun onActivityCreated(a: Activity, b: Bundle?) {}
+        override fun onActivityStarted(a: Activity) {}
+        override fun onActivityPaused(a: Activity) {}
+        override fun onActivityStopped(a: Activity) {}
+        override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
+        override fun onActivityDestroyed(a: Activity) {}
+    }
+
+    // The system owns brightness across a background trip: drop our window
+    // override on resume and keep whatever brightness the system shows now.
+    private fun releaseBrightnessOverride() {
+        val layoutParams = activity.window.attributes
+        layoutParams.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        activity.window.attributes = layoutParams
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent == null) return
+        Log.d("NativeBridgePlugin", "Received intent: action=${intent.action} data=${intent.data}")
+
+        // OAuth callback uses a custom scheme on intent.data and is handled
+        // separately from any user-shared content.
+        intent.data?.let { uri ->
+            val scheme = uri.scheme ?: ""
+            val isReadestAuth = scheme == "readest" && uri.host == "auth-callback"
+            if (isReadestAuth) {
+                val result = JSObject().apply {
+                    put("redirectUrl", uri.toString())
+                }
+                pendingInvoke?.resolve(result)
+                pendingInvoke = null
+                return
+            }
+        }
+
+        when (intent.action) {
+            Intent.ACTION_VIEW -> {
+                // "Open with Readest": the OS hands us a single content://
+                // (or file://) URI on `intent.data`. Take the persistable
+                // permission so we can read it through any subsequent app
+                // launch, then forward it to the JS side via the existing
+                // shared-intent channel — without this trigger, the URI
+                // silently dies in Kotlin and the user just sees the
+                // library splash with nothing happening.
+                val uri = intent.data ?: return
+                tryTakePersistableReadPermission(uri)
+                emitSharedIntent("VIEW", listOf(uri))
+            }
+
+            Intent.ACTION_SEND -> {
+                // Import a single book from the system share sheet.
+                // The URI lives on EXTRA_STREAM, not on intent.data, which
+                // is why the previous data-only handler never saw share
+                // captures at all.
+                val uri = getExtraStream(intent) ?: return
+                tryTakePersistableReadPermission(uri)
+                emitSharedIntent("SEND", listOf(uri))
+            }
+
+            Intent.ACTION_SEND_MULTIPLE -> {
+                val uris = getExtraStreamList(intent)
+                if (uris.isEmpty()) return
+                uris.forEach { tryTakePersistableReadPermission(it) }
+                emitSharedIntent("SEND", uris)
+            }
+        }
+    }
+
+    private fun tryTakePersistableReadPermission(uri: Uri) {
+        // Only content:// URIs support persistable permissions; file://
+        // URIs are accessible directly and would throw SecurityException
+        // here. Skip the call rather than swallow noisy logs.
+        if (uri.scheme != "content") return
+        try {
+            activity.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (e: SecurityException) {
+            Log.w("NativeBridgePlugin", "takePersistableUriPermission failed for $uri: ${e.message}")
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun getExtraStream(intent: Intent): Uri? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun getExtraStreamList(intent: Intent): List<Uri> {
+        val list: ArrayList<Uri>? =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+            }
+        return list ?: emptyList()
+    }
+
+    // shared-intent events emitted before the JS side has registered its
+    // listener via addPluginListener("native-bridge", "shared-intent", ...)
+    // would otherwise vanish — the upstream Plugin.trigger() drops events
+    // when the per-event listener list is empty. This is exactly what
+    // happens on cold launch via "Open with Readest": Android delivers the
+    // ACTION_VIEW intent to onCreate / onNewIntent (the WebView is already
+    // up but the JS app is mid-hydration), we emit it through triggerEvent
+    // immediately, and useAppUrlIngress's addPluginListener call lands a
+    // few hundred ms later — too late to receive the now-discarded event.
+    //
+    // To fix this we queue events whenever no listener is registered, then
+    // replay the queue when a registerListener call lands for this event
+    // (see overridden registerListener below).
+    private val pendingEvents: MutableMap<String, MutableList<JSObject>> = mutableMapOf()
+    private val pendingEventsLock = Any()
+
+    private fun emitSharedIntent(action: String, uris: List<Uri>) {
+        val payload = JSObject().apply {
+            put("action", action)
+            val arr = JSArray()
+            uris.forEach { arr.put(it.toString()) }
+            put("urls", arr)
+        }
+        emitOrQueue("shared-intent", payload)
+    }
+
+    private fun emitOrQueue(eventName: String, payload: JSObject) {
+        if (hasListener(eventName)) {
+            triggerEvent(eventName, payload)
+        } else {
+            synchronized(pendingEventsLock) {
+                val list = pendingEvents.getOrPut(eventName) { mutableListOf() }
+                list.add(payload)
+            }
+            Log.d("NativeBridgePlugin", "Queued $eventName payload (no listener yet); pending size=${pendingEvents[eventName]?.size}")
+        }
+    }
+
+    override fun registerListener(invoke: Invoke) {
+        super.registerListener(invoke)
+        // After super.registerListener, the listener is now wired up.
+        // Drain any queued events for the same name so the JS side gets
+        // events that were emitted between native start and listener
+        // registration.
+        // The event name lives on the invoke args, not directly accessible
+        // post-resolve; instead, drain every queued bucket whose key has a
+        // listener now. Cheap because there's at most one or two events.
+        val toReplay = mutableListOf<Pair<String, JSObject>>()
+        synchronized(pendingEventsLock) {
+            val toRemove = mutableListOf<String>()
+            for ((event, list) in pendingEvents) {
+                if (hasListener(event)) {
+                    list.forEach { toReplay.add(event to it) }
+                    toRemove.add(event)
+                }
+            }
+            toRemove.forEach { pendingEvents.remove(it) }
+        }
+        if (toReplay.isNotEmpty()) {
+            Log.d("NativeBridgePlugin", "Replaying ${toReplay.size} queued event(s) after registerListener")
+            for ((event, payload) in toReplay) {
+                triggerEvent(event, payload)
+            }
+        }
+    }
+
+    @Command
+    fun copy_uri_to_path(invoke: Invoke) {
+        val args = invoke.parseArgs(CopyURIRequestArgs::class.java)
+        pluginScope.launch {
+            val ret = withContext(Dispatchers.IO) {
+                val r = JSObject()
+                try {
+                    val uri = Uri.parse(args.uri ?: "")
+                    val dst = File(args.dst ?: "")
+                    val inputStream = activity.contentResolver.openInputStream(uri)
+
+                    if (inputStream != null) {
+                        dst.outputStream().use { output ->
+                            inputStream.use { input ->
+                                input.copyTo(output)
+                            }
+                        }
+                        r.put("success", true)
+                    } else {
+                        r.put("success", false)
+                        r.put("error", "Failed to open input stream from URI")
+                    }
+                } catch (e: Exception) {
+                    r.put("success", false)
+                    r.put("error", e.message)
+                }
+                r
+            }
+            if (isActive) invoke.resolve(ret)
+        }
+    }
+
+    @Command
+    fun set_system_ui_visibility(invoke: Invoke) {
+        val args = invoke.parseArgs(SetSystemUIVisibilityRequestArgs::class.java)
+        val visible = args.visible ?: false
+        var isDarkMode = args.darkMode ?: false
+        val ret = JSObject()
+        try {
+            val window = activity.window
+            val decorView = window.decorView
+            if (!visible) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    window.attributes.layoutInDisplayCutoutMode =
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                @Suppress("DEPRECATION")
+                window.setDecorFitsSystemWindows(false)
+                val controller = window.insetsController
+                if (controller != null) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    } else {
+                        val compatController = WindowCompat.getInsetsController(window, decorView)
+                        compatController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    }
+
+                    if (isDarkMode) {
+                        controller.setSystemBarsAppearance(
+                            0,
+                            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        )
+                    } else {
+                        controller.setSystemBarsAppearance(
+                            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+                            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        )
+                    }
+                    if (visible) {
+                        controller.show(WindowInsets.Type.statusBars())
+                        controller.hide(WindowInsets.Type.navigationBars())
+                    } else {
+                        controller.hide(WindowInsets.Type.systemBars())
+                    }
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val compatController = WindowCompat.getInsetsController(window, decorView)
+                compatController.let {
+                    it.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    if (!isDarkMode) {
+                        it.isAppearanceLightStatusBars = true
+                    } else {
+                        it.isAppearanceLightStatusBars = false
+                    }
+                    if (visible) {
+                        it.show(WindowInsetsCompat.Type.statusBars())
+                        it.hide(WindowInsetsCompat.Type.navigationBars())
+                    } else {
+                        it.hide(WindowInsetsCompat.Type.systemBars())
+                    }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                decorView.systemUiVisibility = buildList {
+                    add(View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+                    add(View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+                    add(View.SYSTEM_UI_FLAG_HIDE_NAVIGATION)
+                    add(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN)
+                    add(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+
+                    if (!visible) {
+                        add(View.SYSTEM_UI_FLAG_FULLSCREEN)
+                    }
+                    if (visible && !isDarkMode) {
+                        add(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR)
+                    }
+                }.reduce { acc, flag -> acc or flag }
+            }
+            @Suppress("DEPRECATION")
+            window.statusBarColor = Color.TRANSPARENT
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = Color.TRANSPARENT
+            ret.put("success", true)
+        } catch (e: Exception) {
+            ret.put("success", false)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun get_status_bar_height(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            val resourceId = activity.resources.getIdentifier("status_bar_height", "dimen", "android")
+            val height = if (resourceId > 0) {
+                activity.resources.getDimensionPixelSize(resourceId)
+            } else {
+                0
+            }
+            ret.put("height", height)
+        } catch (e: Exception) {
+            ret.put("height", -1)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun get_sys_fonts_list(invoke: Invoke) {
+        pluginScope.launch {
+            val ret = withContext(Dispatchers.IO) {
+                val r = JSObject()
+                try {
+                    val fontList = cachedFontList ?: run {
+                        val fonts = scanFonts()
+                        cachedFontList = fonts
+                        fonts
+                    }
+                    val fontDict = JSObject()
+                    for (fontName in fontList) {
+                        fontDict.put(fontName, fontName)
+                    }
+                    r.put("fonts", fontDict)
+                } catch (e: Exception) {
+                    r.put("error", e.message)
+                }
+                r
+            }
+            if (isActive) invoke.resolve(ret)
+        }
+    }
+
+    // Scanning system fonts walks the font directory and is stable for the
+    // process lifetime, so cache it. @Volatile for safe publication across
+    // the IO dispatcher threads.
+    @Volatile
+    private var cachedFontList: List<String>? = null
+
+    private fun scanFonts(): List<String> {
+        val fontList = mutableListOf<String>()
+        val fontFileList = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val systemFonts = SystemFonts.getAvailableFonts()
+            for (font in systemFonts) {
+                val file = font.getFile() ?: continue
+                if (file.isFile && (file.name.endsWith(".ttf", true) || file.name.endsWith(".otf", true))) {
+                    fontFileList.add(file.name)
+                }
+            }
+        } else {
+            val fontDirs = listOf("/system/fonts", "/system/font", "/data/fonts")
+            for (dirPath in fontDirs) {
+                val dir = File(dirPath)
+                if (dir.exists() && dir.isDirectory) {
+                    dir.listFiles()?.forEach { file ->
+                        if (file.isFile && (file.name.endsWith(".ttf", true) || file.name.endsWith(".otf", true))) {
+                            fontFileList.add(file.name)
+                        }
+                    }
+                }
+            }
+        }
+        for (fileFileName in fontFileList) {
+            val fontName = fileFileName
+                .replace(Regex("\\.(ttf|otf)$", RegexOption.IGNORE_CASE), "")
+                .trim()
+            fontList.add(fontName)
+        }
+        return fontList
+    }
+
+    @Command
+    fun intercept_keys(invoke: Invoke) {
+        val args = invoke.parseArgs(InterceptKeysRequestArgs::class.java)
+        if (activity is KeyDownInterceptor) {
+            val interceptor = activity as KeyDownInterceptor
+            args.backKey?.let { interceptor.interceptBackKey(it) }
+            args.volumeKeys?.let { interceptor.interceptVolumeKeys(it) }
+            args.pageTurnerKeys?.let { interceptor.interceptPageTurnerKeys(it) }
+            args.learnMode?.let { interceptor.setKeyLearnMode(it) }
+        } else {
+            Log.e("NativeBridgePlugin", "Activity does not implement KeyDownInterceptor")
+        }
+        invoke.resolve()
+    }
+
+    @Command
+    fun lock_screen_orientation(invoke: Invoke) {
+      val args = invoke.parseArgs(LockScreenOrientationRequestArgs::class.java)
+      val orientation = args.orientation ?: "auto"
+      when (orientation) {
+          "portrait" -> activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+          "landscape" -> activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+          "auto" -> activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER
+          else -> {
+              invoke.reject("Invalid orientation mode")
+              return
+          }
+      }
+      invoke.resolve()
+    }
+
+    @Command
+    fun get_safe_area_insets(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            val rootView = activity.findViewById<View>(android.R.id.content)
+            val windowInsets = androidx.core.view.ViewCompat.getRootWindowInsets(rootView)
+
+            if (windowInsets != null) {
+                val insets = windowInsets.getInsets(
+                    WindowInsetsCompat.Type.displayCutout()
+                )
+                val density = activity.resources.displayMetrics.density
+                ret.put("top", insets.top / density)
+                ret.put("right", insets.right / density)
+                ret.put("bottom", insets.bottom / density)
+                ret.put("left", insets.left / density)
+            } else {
+                ret.put("top", 0)
+                ret.put("right", 0)
+                ret.put("bottom", 0)
+                ret.put("left", 0)
+            }
+        } catch (e: Exception) {
+            ret.put("error", e.message)
+            ret.put("top", 0)
+            ret.put("right", 0)
+            ret.put("bottom", 0)
+            ret.put("left", 0)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun get_screen_brightness(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            val window = activity.window
+            val layoutParams = window.attributes
+            val brightness = layoutParams.screenBrightness
+
+            if (brightness >= 0.0f) {
+                ret.put("brightness", brightness.toDouble())
+            } else {
+                val systemBrightness = Settings.System.getInt(
+                    activity.contentResolver,
+                    Settings.System.SCREEN_BRIGHTNESS
+                )
+                ret.put("brightness", systemBrightness / 255.0)
+            }
+        } catch (e: Exception) {
+            ret.put("error", e.message)
+            ret.put("brightness", -1.0)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun set_screen_brightness(invoke: Invoke) {
+        val args = invoke.parseArgs(SetScreenBrightnessRequestArgs::class.java)
+        val ret = JSObject()
+        try {
+            val brightness = args.brightness?.toFloat()
+            val layoutParams = activity.window.attributes
+
+            if (brightness == null || brightness < 0.0) {
+                layoutParams.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            } else {
+                if (brightness > 1.0) {
+                    invoke.reject("Brightness must be between 0.0 and 1.0, or null to use system brightness")
+                    return
+                }
+                layoutParams.screenBrightness = brightness
+            }
+
+            activity.window.attributes = layoutParams
+            ret.put("success", true)
+        } catch (e: Exception) {
+            ret.put("success", false)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun has_ambient_light_sensor(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            val sm = activity.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+            val sensor = sm.getDefaultSensor(Sensor.TYPE_LIGHT)
+            ret.put("available", sensor != null)
+        } catch (e: Exception) {
+            ret.put("available", false)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun start_ambient_light_updates(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            if (ambientLightListening) {
+                ret.put("success", true)
+                invoke.resolve(ret)
+                return
+            }
+            val sm = activity.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+            val sensor = sm.getDefaultSensor(Sensor.TYPE_LIGHT)
+            if (sensor == null) {
+                ret.put("success", false)
+                ret.put("error", "No ambient light sensor")
+                invoke.resolve(ret)
+                return
+            }
+            sensorManager = sm
+            lastEmittedLux = Float.NaN
+            sm.registerListener(ambientLightListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            ambientLightListening = true
+            ret.put("success", true)
+        } catch (e: Exception) {
+            ret.put("success", false)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    @Command
+    fun stop_ambient_light_updates(invoke: Invoke) {
+        val ret = JSObject()
+        try {
+            stopAmbientLightUpdatesInternal()
+            ret.put("success", true)
+        } catch (e: Exception) {
+            ret.put("success", false)
+            ret.put("error", e.message)
+        }
+        invoke.resolve(ret)
+    }
+
+    private fun stopAmbientLightUpdatesInternal() {
+        if (!ambientLightListening) return
+        try {
+            sensorManager?.unregisterListener(ambientLightListener)
+        } catch (_: Exception) {
+        }
+        ambientLightListening = false
+        sensorManager = null
+        lastEmittedLux = Float.NaN
+    }
+
+    @Command
+    fun request_manage_storage_permission(invoke: Invoke) {
+        val ret = JSObject()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                try {
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                    intent.data = Uri.parse("package:${activity.packageName}")
+                    activity.startActivityForResult(intent, REQUEST_MANAGE_STORAGE)
+                    ret.put("manageStorage", "denied")
+                    invoke.resolve(ret)
+                } catch (e: Exception) {
+                    val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    activity.startActivity(intent)
+                    ret.put("manageStorage", "denied")
+                    invoke.resolve(ret)
+                }
+            } else {
+                ret.put("manageStorage", "granted")
+                invoke.resolve(ret)
+            }
+        } else {
+            val readPermission = ContextCompat.checkSelfPermission(
+                activity,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            )
+            val writePermission = ContextCompat.checkSelfPermission(
+                activity,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+            if (readPermission == PackageManager.PERMISSION_GRANTED &&
+                writePermission == PackageManager.PERMISSION_GRANTED) {
+                ret.put("manageStorage", "granted")
+                invoke.resolve(ret)
+            } else {
+                ActivityCompat.requestPermissions(
+                    activity,
+                    arrayOf(
+                        Manifest.permission.READ_EXTERNAL_STORAGE,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    ),
+                    REQUEST_MANAGE_STORAGE
+                )
+                ret.put("manageStorage", "prompt")
+                invoke.resolve(ret)
+            }
+        }
+    }
+
+    @Command
+    fun select_directory(invoke: Invoke) {
+        pendingFolderPickerInvoke = invoke
+
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+            activity.startActivityForResult(intent, FOLDER_PICKER_REQUEST_CODE)
+        } catch (e: Exception) {
+            val result = JSObject()
+            result.put("cancelled", true)
+            result.put("uri", null)
+            result.put("path", null)
+            result.put("error", e.message)
+            invoke.resolve(result)
+            pendingFolderPickerInvoke = null
+        }
+    }
+
+    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == FOLDER_PICKER_REQUEST_CODE) {
+            val invoke = pendingFolderPickerInvoke
+            if (invoke != null) {
+                handleDirectorySelected(data?.data, invoke)
+                pendingFolderPickerInvoke = null
+            }
+        }
+    }
+
+    private fun handleDirectorySelected(uri: Uri?, invoke: Invoke) {
+        val result = JSObject()
+        if (uri == null) {
+            result.put("cancelled", true)
+            result.put("uri", null)
+            result.put("path", null)
+        } else {
+            try {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                          Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                activity.contentResolver.takePersistableUriPermission(uri, flags)
+                result.put("cancelled", false)
+                result.put("uri", uri.toString())
+                result.put("path", extractPathFromUri(uri))
+            } catch (e: SecurityException) {
+                result.put("cancelled", true)
+                result.put("uri", uri.toString())
+                result.put("path", extractPathFromUri(uri))
+                result.put("error", "Permission error: ${e.message}")
+            } catch (e: Exception) {
+                result.put("cancelled", true)
+                result.put("uri", null)
+                result.put("path", null)
+                result.put("error", "Error: ${e.message}")
+            }
+        }
+
+        invoke.resolve(result)
+        pendingInvoke = null
+    }
+
+    private fun extractPathFromUri(uri: Uri): String? {
+        val path = uri.path ?: return null
+        return try {
+            when {
+                DocumentsContract.isTreeUri(uri) -> {
+                    val treeDocId = DocumentsContract.getTreeDocumentId(uri)
+                    val split = treeDocId.split(":")
+                    if (split[0].equals("primary", ignoreCase = true)) {
+                        if (split.size > 1) {
+                            Environment.getExternalStorageDirectory().path + "/" + split[1]
+                        } else {
+                            Environment.getExternalStorageDirectory().path
+                        }
+                    } else {
+                        "/storage/${split[0]}/" + (if (split.size > 1) split[1] else "")
+                    }
+                }
+                else -> null
+            }
+        } catch (e: Exception) {
+            path
+        }
+    }
+
+    fun triggerEvent(eventName: String, payload: JSObject) {
+        activity.runOnUiThread {
+            trigger(eventName, payload)
+        }
+    }
+
+    /**
+     * Trigger a deep e-ink full screen refresh (GC16 waveform) to clear
+     * ghosting. Driven by the page-turner "Refresh Page" action on e-ink
+     * Android devices. Runs on the UI thread against the window's decor view;
+     * [EinkRefreshController] probes each vendor mechanism and resolves
+     * `success: false` (not an error) when none is available.
+     */
+    @Command
+    fun refresh_eink_screen(invoke: Invoke) {
+        activity.runOnUiThread {
+            val ret = JSObject()
+            try {
+                val view = activity.window?.decorView
+                val ok = view != null && EinkRefreshController.refresh(view)
+                ret.put("success", ok)
+            } catch (e: Exception) {
+                Log.e("NativeBridgePlugin", "refresh_eink_screen failed", e)
+                ret.put("success", false)
+                ret.put("error", e.message ?: "unknown")
+            }
+            invoke.resolve(ret)
+        }
+    }
+
+    /**
+     * Snapshot a region of the webview for the mesh page-curl texture
+     * (readest#555). The rect arrives in CSS pixels of the JS viewport;
+     * scaling by the display density (devicePixelRatio) maps it to window
+     * pixels. PixelCopy reads back from the window surface, which includes
+     * the hardware-accelerated WebView that View.draw would miss. Resolved
+     * as base64 because the plugin boundary is JSON-only; the Rust side
+     * decodes back to bytes.
+     *
+     * The result is JPEG, not PNG: a full-screen 3x PNG took ~1.5s to
+     * encode per page turn on a Xiaomi 13, which read as the curl not
+     * working at all. The page is opaque so JPEG loses nothing visible,
+     * and the destination bitmap is capped at 2x CSS pixels — PixelCopy
+     * scales into a smaller bitmap for free and the moving page stays
+     * visually sharp.
+     */
+    @Command
+    fun capture_webview_region(invoke: Invoke) {
+        val args = invoke.parseArgs(CaptureWebviewRegionArgs::class.java)
+        val webView = webViewRef
+        val window = activity.window
+        if (webView == null || window == null) {
+            invoke.reject("WebView not available")
+            return
+        }
+        activity.runOnUiThread {
+            val density = webView.resources.displayMetrics.density
+            val location = IntArray(2)
+            webView.getLocationInWindow(location)
+            val left = location[0] + (args.x * density).toInt()
+            val top = location[1] + (args.y * density).toInt()
+            val width = (args.width * density).toInt()
+            val height = (args.height * density).toInt()
+            if (width <= 0 || height <= 0) {
+                invoke.reject("Empty capture region")
+                return@runOnUiThread
+            }
+            val captureScale = minOf(density, 2f)
+            val destWidth = (args.width * captureScale).toInt()
+            val destHeight = (args.height * captureScale).toInt()
+            val bitmap = Bitmap.createBitmap(destWidth, destHeight, Bitmap.Config.ARGB_8888)
+            try {
+                PixelCopy.request(
+                    window,
+                    Rect(left, top, left + width, top + height),
+                    bitmap,
+                    { result ->
+                        if (result == PixelCopy.SUCCESS) {
+                            // Encode off the main thread; ~100ms of work for
+                            // a full-screen 2x JPEG.
+                            pluginScope.launch {
+                                val data = withContext(Dispatchers.IO) {
+                                    val out = ByteArrayOutputStream()
+                                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                                    Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                                }
+                                invoke.resolve(JSObject().put("data", data))
+                            }
+                        } else {
+                            invoke.reject("PixelCopy failed: $result")
+                        }
+                    },
+                    Handler(Looper.getMainLooper())
+                )
+            } catch (e: IllegalArgumentException) {
+                // Thrown when the rect falls outside the window bounds.
+                invoke.reject("Capture region out of bounds: ${e.message}")
+            }
+        }
+    }
+}

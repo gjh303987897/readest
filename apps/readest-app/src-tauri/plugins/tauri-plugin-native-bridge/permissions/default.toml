@@ -1,0 +1,27 @@
+[default]
+description = "Default permissions for the plugin"
+permissions = [
+  "allow-copy-uri-to-path",
+  "allow-set-system-ui-visibility",
+  "allow-get-status-bar-height",
+  "allow-get-sys-fonts-list",
+  "allow-intercept-keys",
+  "allow-lock-screen-orientation",
+  "allow-get-system-color-scheme",
+  "allow-get-safe-area-insets",
+  "allow-get-screen-brightness",
+  "allow-set-screen-brightness",
+  "allow-has-ambient-light-sensor",
+  "allow-start-ambient-light-updates",
+  "allow-stop-ambient-light-updates",
+  "allow-select-directory",
+  "allow-request-manage-storage-permission",
+  "allow-register-listener",
+  "allow-remove-listener",
+  "allow-check-permissions",
+  "allow-request-permissions",
+  "allow-checkPermissions",
+  "allow-requestPermissions",
+  "allow-refresh-eink-screen",
+  "allow-capture-webview-region",
+]

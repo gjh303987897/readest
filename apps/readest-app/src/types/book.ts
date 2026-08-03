@@ -1,0 +1,366 @@
+import { BookMetadata } from '@/libs/document';
+
+export type BookFormat =
+  | 'EPUB'
+  | 'PDF'
+  | 'MOBI'
+  | 'AZW'
+  | 'AZW3'
+  | 'CBZ'
+  | 'FB2'
+  | 'FBZ'
+  | 'TXT'
+  | 'MD';
+
+export const FIXED_LAYOUT_FORMATS: Set<BookFormat> = new Set(['PDF', 'CBZ']);
+
+/**
+ * Lookup tables built from a Book[] for O(1) hash and metaHash queries during
+ * batch import. Mutated in place by importBook so subsequent files in the
+ * same batch see books added by earlier files. Defined here (rather than in
+ * services/bookService) so the AppService interface in types/system can
+ * reference it without an inline `import(...)` type.
+ */
+export interface BookLookupIndex {
+  byHash: Map<string, Book>;
+  byMetaKey: Map<string, Book[]>; // key = `${metaHash}:${format}`
+  // Maps normalized absolute source path -> Book for in-place imports.
+  // Lets the importer recognize "I already have this exact file" without
+  // having to open, parse, and hash it again. Only books with a non-empty
+  // `filePath` and `!deletedAt` are indexed. The key is produced by
+  // `normalizeFilePathForIndex` so callers must use the same helper to
+  // probe; importBook handles that internally.
+  byFilePath: Map<string, Book>;
+}
+
+/**
+ * User-facing options for AppService.importBook. The bookService implementation
+ * extends this with required callbacks (saveBookConfig / generateCoverImageUrl)
+ * that are bound by the AppService instance.
+ */
+export interface ImportBookOptions {
+  /** Whether to copy the file into the Books directory. Defaults to true. */
+  saveBook?: boolean;
+  /** Whether to extract and save a cover image. Defaults to true. */
+  saveCover?: boolean;
+  /** Whether to overwrite an existing file at the same path. Defaults to false. */
+  overwrite?: boolean;
+  /** Whether the import is transient (not stored long-term). Defaults to false. */
+  transient?: boolean;
+  /**
+   * If true, do NOT copy the source file into Books/<hash>/. Instead, persist
+   * an absolute filePath on the Book and let isBookAvailable / loadBookContent
+   * fall back to it. The caller is responsible for verifying the source is
+   * already inside the user's chosen library root (customRootDir) so that the
+   * file remains stable across launches. Sidecar files (cover.png, config.json,
+   * nav.json) are still written to Books/<hash>/ as usual. Defaults to false.
+   */
+  inPlace?: boolean;
+  /** Pre-built lookup index for O(1) dedup during batch imports. */
+  lookupIndex?: BookLookupIndex;
+}
+
+export interface Book {
+  // if Book is a remote book we just lazy load the book content via url
+  url?: string;
+  // if Book is a transient local book we can load the book content via filePath
+  filePath?: string;
+  // Other on-disk paths that resolved to this same book — a watched folder
+  // holding the same file twice under different names, or a copy left behind
+  // after a rename. Only `filePath` is ever read from; these are remembered so
+  // the auto-import scan doesn't treat a known duplicate as a new file on every
+  // pass. Device-local like `filePath`: never published to peers.
+  altFilePaths?: string[];
+  // Partial md5 hash of the book file, used as the unique identifier
+  hash: string;
+  // Metadata md5 hash, used to aggregate different versions of the same book
+  metaHash?: string;
+  format: BookFormat;
+  title: string; // editable title from metadata
+  sourceTitle?: string; // parsed when the book is imported and used to locate the file
+  author: string;
+  coverImageUrl?: string | null;
+  // Partial MD5 of the local cover.png. Content-addressed cover-change signal:
+  // a peer re-downloads the cover iff its synced value differs from the local
+  // one (issue #4544). Invariant: coverHash === partialMD5(cover.png).
+  coverHash?: string | null;
+
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number | null;
+
+  uploadedAt?: number | null;
+  downloadedAt?: number | null;
+  coverDownloadedAt?: number | null;
+  // Field-level LWW timestamp for the cover, so a page-turn that wins whole-row
+  // LWW on updatedAt cannot clobber a cover refresh.
+  coverUpdatedAt?: number | null;
+  syncedAt?: number | null;
+
+  lastUpdated?: number; // deprecated in favor of updatedAt
+  progress?: [number, number]; // Add progress field: [current, total], 1-based page number
+  primaryLanguage?: string;
+
+  metadata?: BookMetadata;
+}
+
+export interface PageInfo {
+  current: number;
+  next?: number;
+  total: number;
+}
+
+// Remaining time of the book in minutes
+export interface TimeInfo {
+  section: number;
+  total: number;
+}
+
+export type WritingMode = 'auto' | 'horizontal-tb' | 'horizontal-rl' | 'vertical-rl';
+
+export interface BookLayout {
+  marginTopPx: number;
+  marginBottomPx: number;
+  marginLeftPx: number;
+  marginRightPx: number;
+  marginPx?: number; // deprecated
+  compactMarginTopPx: number;
+  compactMarginBottomPx: number;
+  compactMarginLeftPx: number;
+  compactMarginRightPx: number;
+  compactMarginPx?: number; // deprecated
+  gapPercent: number;
+  scrolled: boolean;
+  webtoonMode: boolean;
+  noContinuousScroll: boolean;
+  disableClick: boolean;
+  disableSwipe: boolean;
+  fullscreenClickArea: boolean;
+  swapClickArea: boolean;
+  disableDoubleClick: boolean;
+  volumeKeysToFlip: boolean;
+  maxColumnCount: number;
+  maxInlineSize: number;
+  maxBlockSize: number;
+  writingMode: WritingMode;
+  vertical: boolean;
+  rtl: boolean;
+  scrollingOverlap: number;
+  allowScript: boolean;
+  hideScrollbar: boolean;
+}
+
+export interface BookStyle {
+  zoomLevel: number;
+  paragraphMargin: number;
+  lineHeight: number;
+  wordSpacing: number;
+  letterSpacing: number;
+  textIndent: number;
+  fullJustification: boolean;
+  hyphenation: boolean;
+  theme: string;
+  userStylesheet: string;
+  userUIStylesheet: string;
+
+  overrideFont: boolean;
+  overrideLayout: boolean;
+  overrideColor: boolean;
+  useBookLayout: boolean;
+
+  // fixed-layout specific
+  zoomMode: 'fit-page' | 'fit-width' | 'original-size' | 'custom';
+  spreadMode: 'auto' | 'none';
+  keepCoverSpread: boolean;
+  invertImgColorInDark: boolean;
+  applyThemeToPDF: boolean;
+  contrast: number;
+}
+
+export interface BookFont {
+  serifFont: string;
+  sansSerifFont: string;
+  monospaceFont: string;
+  defaultFont: string;
+  defaultCJKFont: string;
+  defaultFontSize: number;
+  minimumFontSize: number;
+  fontWeight: number;
+}
+
+export interface BookLanguage {
+  replaceQuotationMarks: boolean;
+}
+
+// 'push' slides the whole strip; 'slide' and 'curl' layer the outgoing page
+// over the still incoming page (Apple Books style, needs View Transitions).
+export type PageTurnStyle = 'push' | 'slide' | 'curl';
+export interface ViewConfig {
+  uiLanguage: string;
+  sortedTOC: boolean;
+
+  doubleBorder: boolean;
+  borderColor: string;
+
+  showHeader: boolean;
+  showFooter: boolean;
+  showRemainingTime: boolean;
+  showRemainingPages: boolean;
+  showProgressInfo: boolean;
+  showStickyProgressBar: boolean;
+  showCurrentTime: boolean;
+  use24HourClock: boolean;
+  showCurrentBatteryStatus: boolean;
+  showBatteryPercentage: boolean;
+  showPaginationButtons: boolean;
+  progressStyle: 'percentage' | 'fraction' | 'reference';
+  referencePageCount: number;
+
+  animated: boolean;
+  pageTurnStyle: PageTurnStyle;
+  isEink: boolean;
+  isColorEink: boolean;
+}
+
+export interface ScreenConfig {
+  screenOrientation: 'auto' | 'portrait' | 'landscape';
+}
+
+export interface ViewSettingsConfig {
+  isGlobal: boolean;
+}
+
+export interface ViewSettings
+  extends BookLayout,
+    BookStyle,
+    BookFont,
+    BookLanguage,
+    ViewConfig,
+    ScreenConfig,
+    ViewSettingsConfig {}
+
+export interface BookProgress {
+  location: string;
+  sectionHref: string;
+  sectionLabel: string;
+  section: PageInfo;
+  pageinfo: PageInfo;
+  pageItem?: { label?: string; href?: string } | null;
+  timeinfo: TimeInfo;
+  // Overall reading position in foliate's size-domain (0..1), matching the
+  // domain used by the sticky progress bar's chapter ticks.
+  fraction: number;
+  index: number;
+  range: Range;
+  page: number;
+}
+
+export type SearchMode = 'contains' | 'whole-words' | 'regex' | 'nearby-words';
+
+export interface BookSearchConfig {
+  scope: 'book' | 'section';
+  mode: SearchMode;
+  matchCase: boolean;
+  matchDiacritics: boolean;
+  // nearby-words: maximum number of words separating the matched words
+  nearbyWords?: number;
+  /** @deprecated since schema v3 — mirrors `mode === 'whole-words'`; kept for sync wire back-compat. */
+  matchWholeWords?: boolean;
+  index?: number;
+  query?: string;
+  acceptNode?: (node: Node) => number;
+
+  // pre-cached search results
+  results?: BookSearchResult[] | BookSearchMatch[] | null;
+}
+
+export type LibrarySearchConfig = Omit<BookSearchConfig, 'mode'> & {
+  mode: SearchMode | 'fuzzy';
+};
+
+export type LibrarySearchTarget = 'books' | 'text';
+
+export interface SearchExcerpt {
+  pre: string;
+  match: string;
+  post: string;
+  // nearby-words: the cluster window split into matched (emphasized) words and gaps
+  segments?: { text: string; emphasized: boolean }[];
+}
+
+export interface BookSearchMatch {
+  cfi: string;
+  // nearby-words: per-word CFIs to highlight (>= 2); absent for single-span matches
+  cfis?: string[];
+  excerpt: SearchExcerpt;
+}
+
+// Text-offset locator into a section's extracted text. Library search results
+// carry locators instead of CFIs; the CFI is resolved lazily on click so
+// searching never needs live DOM Ranges (see librarySearchService).
+export interface SearchResultLocator {
+  section: number;
+  start: number;
+  end: number;
+  // fuzzy/nearby: matched sub-spans within [start, end)
+  runs?: { start: number; end: number }[];
+}
+
+export interface LibrarySearchMatch {
+  locator: SearchResultLocator;
+  excerpt: SearchExcerpt;
+}
+
+export interface LibrarySearchSectionResult {
+  index: number;
+  label: string;
+  subitems: LibrarySearchMatch[];
+}
+
+export interface BookSearchResult {
+  index?: number;
+  label: string;
+  subitems: BookSearchMatch[];
+  progress?: number;
+}
+
+export const BOOK_CONFIG_SCHEMA_VERSION = 3;
+
+export interface BookConfig {
+  schemaVersion?: number;
+  bookHash?: string;
+  metaHash?: string;
+  progress?: [number, number]; // [current pagenum, total pagenum], 1-based page number
+  location?: string; // CFI of the current location
+  searchConfig?: Partial<BookSearchConfig>;
+  viewSettings?: Partial<ViewSettings>;
+
+  lastSyncedAtConfig?: number;
+  lastPushedAtConfig?: number;
+
+  updatedAt: number;
+}
+
+export interface BookDataRecord {
+  id: string;
+  book_hash: string;
+  meta_hash?: string;
+  user_id: string;
+  updated_at: number | null;
+  deleted_at: number | null;
+  // Server-assigned incremental-pull cursor, decoupled from updated_at (the
+  // client event time / sort key). Present on books rows from a server that
+  // ran migration 016; absent (fall back to updated_at) on older servers and
+  // on config/note records. Carried over the wire as an ISO-8601 string.
+  // See issue #4678.
+  synced_at?: string | null;
+  // Only book records carry an upload state: a book is indexed in the cloud
+  // as soon as its metadata syncs, but is unavailable to peers until its file
+  // blob is uploaded. Absent on config/note records.
+  uploaded_at?: string | null;
+}
+
+export interface BookContent {
+  book: Book;
+  file: File;
+}
