@@ -49,6 +49,7 @@ printf '%s\n' \
   'filesystems=home;' \
   > "$build_dir/metadata"
 
+flatpak build-finish "$build_dir"
 flatpak build-export --arch="$flatpak_arch" "$flatpak_repo" "$build_dir" stable
 flatpak build-bundle \
   --arch="$flatpak_arch" \

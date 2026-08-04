@@ -320,7 +320,7 @@ jobs:
         run: |
           rm -rf src-tauri/gen/apple
           pnpm tauri ios init --ci
-          pnpm tauri ios build --debug --target aarch64-sim --ci -- CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          pnpm tauri ios build --debug --target aarch64-sim --ci --no-sign
 
       - name: Archive iOS simulator app
         working-directory: apps/readest-app
