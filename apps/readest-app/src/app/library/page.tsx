@@ -13,6 +13,7 @@ import {
   LogOut,
   RefreshCw,
   Search,
+  Settings,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -38,6 +39,7 @@ import BookCover from '@/components/BookCover';
 import Spinner from '@/components/Spinner';
 import { Toast } from '@/components/Toast';
 import WindowButtons from '@/components/WindowButtons';
+import SettingsDialog from '@/components/settings/SettingsDialog';
 import { useBooksSync } from './hooks/useBooksSync';
 import { useBookTransferActions } from './hooks/useBookTransferActions';
 
@@ -51,7 +53,8 @@ const LibraryPage = () => {
   const router = useAppRouter();
   const { envConfig, appService } = useEnv();
   const { user, logout } = useAuth();
-  const { settings } = useSettingsStore();
+  const { settings, isSettingsDialogOpen, setSettingsDialogBookKey, setSettingsDialogOpen } =
+    useSettingsStore();
   const { libraryLoaded } = useLibrary();
   const library = useLibraryStore((state) => state.visibleLibrary);
   const updateBook = useLibraryStore((state) => state.updateBook);
@@ -276,6 +279,18 @@ const LibraryPage = () => {
           <button
             type='button'
             className='btn btn-ghost btn-square h-9 min-h-9 w-9'
+            title={_('Settings')}
+            aria-label={_('Settings')}
+            onClick={() => {
+              setSettingsDialogBookKey('');
+              setSettingsDialogOpen(true);
+            }}
+          >
+            <Settings className='h-4 w-4' />
+          </button>
+          <button
+            type='button'
+            className='btn btn-ghost btn-square h-9 min-h-9 w-9'
             title={user ? _('Log Out') : _('Log In')}
             aria-label={user ? _('Log Out') : _('Log In')}
             onClick={() => (user ? void logout() : navigateToLogin(router))}
@@ -406,6 +421,7 @@ const LibraryPage = () => {
           })}
         </section>
       )}
+      {isSettingsDialogOpen && <SettingsDialog bookKey='' initialPanel='General' />}
       <Toast />
     </main>
   );

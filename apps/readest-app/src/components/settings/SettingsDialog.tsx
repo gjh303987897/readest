@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import React, { useMemo, useState } from 'react';
-import { LayoutGrid, MousePointer2, Palette, RotateCcw, Type, X } from 'lucide-react';
+import { LayoutGrid, MousePointer2, Palette, RotateCcw, Settings2, Type, X } from 'lucide-react';
 
 import { useEnv } from '@/context/EnvContext';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -10,21 +10,26 @@ import FontPanel from './FontPanel';
 import LayoutPanel from './LayoutPanel';
 import ThemePanel from './ThemePanel';
 import ControlPanel from './ControlPanel';
+import GeneralPanel from './GeneralPanel';
 
-export type SettingsPanelType = 'Font' | 'Layout' | 'Theme' | 'Control';
+export type SettingsPanelType = 'General' | 'Font' | 'Layout' | 'Theme' | 'Control';
 
 export type SettingsPanelPanelProp = {
   bookKey: string;
   onRegisterReset: (resetFn: () => void) => void;
 };
 
-const SettingsDialog: React.FC<{ bookKey: string }> = ({ bookKey }) => {
+const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelType }> = ({
+  bookKey,
+  initialPanel,
+}) => {
   const _ = useTranslation();
   const { appService } = useEnv();
   const { setSettingsDialogOpen } = useSettingsStore();
 
   const tabs = useMemo(
     () => [
+      { id: 'General' as const, label: _('General'), Icon: Settings2 },
       { id: 'Font' as const, label: _('Font'), Icon: Type },
       { id: 'Layout' as const, label: _('Layout'), Icon: LayoutGrid },
       { id: 'Theme' as const, label: _('Theme'), Icon: Palette },
@@ -35,6 +40,7 @@ const SettingsDialog: React.FC<{ bookKey: string }> = ({ bookKey }) => {
   const isPanel = (value: string | null): value is SettingsPanelType =>
     tabs.some((tab) => tab.id === value);
   const [activePanel, setActivePanel] = useState<SettingsPanelType>(() => {
+    if (initialPanel) return initialPanel;
     const previous = localStorage.getItem('lastConfigPanel');
     return isPanel(previous) ? previous : 'Font';
   });
@@ -107,6 +113,9 @@ const SettingsDialog: React.FC<{ bookKey: string }> = ({ bookKey }) => {
       }
     >
       <div role='tabpanel' aria-label={currentLabel}>
+        {activePanel === 'General' && (
+          <GeneralPanel onRegisterReset={(reset) => registerReset('General', reset)} bookKey='' />
+        )}
         {activePanel === 'Font' && (
           <FontPanel bookKey={bookKey} onRegisterReset={(reset) => registerReset('Font', reset)} />
         )}

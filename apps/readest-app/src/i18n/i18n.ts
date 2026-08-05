@@ -4,7 +4,7 @@ import translatableLngs from '../../i18n-langs.json';
 import { initReactI18next } from 'react-i18next';
 
 // 'en' is the source language and not listed in the translatable set.
-const SUPPORTED_LNGS = ['en', ...translatableLngs];
+export const SUPPORTED_LNGS = ['en', ...translatableLngs];
 
 const isBrowser = typeof window !== 'undefined';
 
