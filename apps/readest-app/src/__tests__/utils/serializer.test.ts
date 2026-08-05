@@ -36,6 +36,30 @@ describe('BookConfig serialization', () => {
     expect(parsed.searchConfig).toEqual({ query: 'alice' });
   });
 
+  it('round-trips bookmarks in per-book config JSON', () => {
+    const config: BookConfig = {
+      updatedAt: 123,
+      bookmarks: [
+        {
+          id: 'bookmark-1',
+          location: 'epubcfi(/6/8!/4/2)',
+          title: 'Opening scene',
+          sectionLabel: 'Chapter 1',
+          page: 3,
+          fraction: 0.03,
+          createdAt: 100,
+          updatedAt: 100,
+        },
+      ],
+    };
+
+    const serialized = serializeConfig(config, globalViewSettings, defaultSearchConfig);
+    const restored = deserializeConfig(serialized, globalViewSettings, defaultSearchConfig);
+
+    expect(restored.bookmarks).toEqual(config.bookmarks);
+    expect(restored.schemaVersion).toBe(BOOK_CONFIG_SCHEMA_VERSION);
+  });
+
   it('writes schemaVersion to raw config JSON without mutating the caller object', () => {
     const config: Partial<BookConfig> = {
       updatedAt: 456,

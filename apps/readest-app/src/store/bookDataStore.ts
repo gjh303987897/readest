@@ -150,7 +150,11 @@ export const useBookDataStore = create<BookDataState>((set, get) => ({
     // caller-provided object. This notifies Zustand subscribers and works
     // regardless of whether the caller passed the shared store config.
     get().setConfig(bookKey, { updatedAt: now });
-    const configToSave = { ...config, updatedAt: now };
+    // A progress auto-save and a bookmark edit can overlap. Always persist the
+    // latest store snapshot so an older in-flight caller cannot overwrite a
+    // bookmark that was added after that caller captured its config object.
+    const latestConfig = get().getConfig(bookKey) ?? config;
+    const configToSave = { ...latestConfig, updatedAt: now };
     // Per-book config: still write eagerly — it's small and is the source of truth used by sync to
     // reconstruct the shelf if library.json is missing or stale.
     await appService.saveBookConfig(updatedBook, configToSave, settings);

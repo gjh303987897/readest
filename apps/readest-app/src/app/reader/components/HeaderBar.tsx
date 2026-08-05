@@ -18,6 +18,7 @@ import WindowButtons from '@/components/WindowButtons';
 import SidebarToggler from './SidebarToggler';
 import SettingsToggler from './SettingsToggler';
 import ViewMenu from './ViewMenu';
+import BookmarkButton from './BookmarkButton';
 
 interface HeaderBarProps {
   bookKey: string;
@@ -53,6 +54,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   const { getView, setHoveredBookKey } = useReaderStore();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isBookmarkDialogOpen, setIsBookmarkDialogOpen] = useState(false);
   const [headerWidth, setHeaderWidth] = useState(0);
   const view = getView(bookKey);
   const iconSize18 = useResponsiveSize(18);
@@ -103,7 +105,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
 
   const isHeaderCompact = headerWidth > 0 && headerWidth < 350;
   const insets = window.innerWidth < 640 ? screenInsets : gridInsets;
-  const isHeaderVisible = hoveredBookKey === bookKey || isDropdownOpen;
+  const isHeaderVisible = hoveredBookKey === bookKey || isDropdownOpen || isBookmarkDialogOpen;
   const isMobile = appService?.isMobile || window.innerWidth < 640;
 
   useSpatialNavigation(headerRef, isHeaderVisible);
@@ -163,7 +165,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
           !isSideBarVisible && appService?.hasRoundedWindow && 'rounded-window-top-left',
           isHoveredAnim && 'hover-bar-anim',
           isHeaderVisible ? 'pointer-events-auto visible' : 'pointer-events-none opacity-0',
-          isDropdownOpen && 'header-bar-pinned',
+          (isDropdownOpen || isBookmarkDialogOpen) && 'header-bar-pinned',
         )}
         style={{
           marginTop: systemUIVisible
@@ -197,6 +199,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
             >
               <VscLibrary size={iconSize18} className='fill-base-content' />
             </button>
+            <BookmarkButton bookKey={bookKey} onOpenChange={setIsBookmarkDialogOpen} />
           </div>
         </div>
 

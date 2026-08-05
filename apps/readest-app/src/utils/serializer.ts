@@ -75,7 +75,7 @@ export const deserializeConfig = (
   sc.mode = ensureSearchMode(searchConfig ?? {});
   sc.matchWholeWords = modeToWholeWords(sc.mode);
   sc.nearbyWords ??= DEFAULT_NEARBY_WORDS;
-  config.schemaVersion ??= BOOK_CONFIG_SCHEMA_VERSION;
+  config.schemaVersion = BOOK_CONFIG_SCHEMA_VERSION;
   config.updatedAt ??= Date.now();
   return config;
 };

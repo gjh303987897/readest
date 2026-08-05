@@ -389,5 +389,30 @@ describe('bookDataStore', () => {
       const persistedConfig = saveBookConfig.mock.calls[0]![1] as BookConfig;
       expect(persistedConfig.updatedAt).toBeGreaterThan(1000);
     });
+
+    test('persists the latest store snapshot when the caller config is stale', async () => {
+      const saveBookConfig = vi.fn().mockResolvedValue(undefined);
+      const saveLibraryBooks = vi.fn().mockResolvedValue(undefined);
+      const envConfig = makeEnvConfig({ saveBookConfig, saveLibraryBooks });
+
+      useLibraryStore.getState().setLibrary([makeLibraryBook({ hash: 'h1' })]);
+
+      const data = makeBookData('h1', { progress: [42, 100] });
+      useBookDataStore.setState({ booksData: { h1: data } });
+      const staleConfig = { ...data.config! };
+      const bookmark = {
+        id: 'bookmark-1',
+        location: 'epubcfi(/6/8!/4/2)',
+        title: 'Keep me',
+        createdAt: 1000,
+        updatedAt: 1000,
+      };
+      useBookDataStore.getState().setConfig('h1', { bookmarks: [bookmark] });
+
+      await useBookDataStore.getState().saveConfig(envConfig, 'h1', staleConfig, FAKE_SETTINGS);
+
+      const persistedConfig = saveBookConfig.mock.calls[0]![1] as BookConfig;
+      expect(persistedConfig.bookmarks).toEqual([bookmark]);
+    });
   });
 });

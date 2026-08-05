@@ -255,6 +255,17 @@ export interface BookProgress {
   page: number;
 }
 
+export interface BookBookmark {
+  id: string;
+  location: string;
+  title: string;
+  sectionLabel?: string;
+  page?: number;
+  fraction?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type SearchMode = 'contains' | 'whole-words' | 'regex' | 'nearby-words';
 
 export interface BookSearchConfig {
@@ -324,7 +335,7 @@ export interface BookSearchResult {
   progress?: number;
 }
 
-export const BOOK_CONFIG_SCHEMA_VERSION = 3;
+export const BOOK_CONFIG_SCHEMA_VERSION = 4;
 
 export interface BookConfig {
   schemaVersion?: number;
@@ -332,6 +343,7 @@ export interface BookConfig {
   metaHash?: string;
   progress?: [number, number]; // [current pagenum, total pagenum], 1-based page number
   location?: string; // CFI of the current location
+  bookmarks?: BookBookmark[];
   searchConfig?: Partial<BookSearchConfig>;
   viewSettings?: Partial<ViewSettings>;
 
