@@ -1,25 +1,28 @@
-import type { Book, BookConfig, BookDataRecord } from '@/types/book';
+import type { Book, BookConfig, BookDataRecord, BookNote } from '@/types/book';
 import { getAPIBaseUrl } from '@/services/environment';
 import { getAccessToken } from '@/utils/access';
 import { fetchWithTimeout } from '@/utils/fetch';
 
 const getSyncEndpoint = () => getAPIBaseUrl() + '/sync';
 
-export type SyncType = 'books' | 'configs';
+export type SyncType = 'books' | 'configs' | 'notes';
 export type SyncOp = 'push' | 'pull' | 'both';
 
 interface BookRecord extends BookDataRecord, Book {}
 interface BookConfigRecord extends BookDataRecord, BookConfig {}
+interface BookNoteRecord extends BookDataRecord, BookNote {}
 export interface SyncResult {
   books: BookRecord[] | null;
   configs: BookConfigRecord[] | null;
+  notes: BookNoteRecord[] | null;
 }
 
-export type SyncRecord = BookRecord & BookConfigRecord;
+export type SyncRecord = BookRecord | BookConfigRecord | BookNoteRecord;
 
 export interface SyncData {
   books?: Partial<BookRecord>[];
   configs?: Partial<BookConfigRecord>[];
+  notes?: Partial<BookNoteRecord>[];
 }
 
 export class SyncClient {

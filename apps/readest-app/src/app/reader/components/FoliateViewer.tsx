@@ -16,6 +16,7 @@ import BrightnessOverlay from './BrightnessOverlay';
 import { usePagination, viewPagination } from '../hooks/usePagination';
 import { useFoliateEvents } from '../hooks/useFoliateEvents';
 import { useProgressSync } from '../hooks/useProgressSync';
+import { useBookmarkSync } from '../hooks/useBookmarkSync';
 import { useProgressAutoSave } from '../hooks/useProgressAutoSave';
 import { useAutoFocus } from '@/hooks/useAutoFocus';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -126,6 +127,7 @@ const FoliateViewer: React.FC<{
 
   useUICSS(bookKey);
   useProgressSync(bookKey);
+  useBookmarkSync(bookKey);
   useProgressAutoSave(bookKey);
 
   // Coalesce setProgress writes within a single animation frame.

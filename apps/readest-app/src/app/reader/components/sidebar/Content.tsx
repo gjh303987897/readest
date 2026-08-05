@@ -19,7 +19,9 @@ const SidebarContent: React.FC<{
   const _ = useTranslation();
   const bookId = sideBarBookKey.split('-')[0]!;
   const bookmarkCount = useBookDataStore(
-    (state) => state.booksData[bookId]?.config?.bookmarks?.length ?? 0,
+    (state) =>
+      state.booksData[bookId]?.config?.bookmarks?.filter((bookmark) => !bookmark.deletedAt)
+        .length ?? 0,
   );
   const hasTOC = Boolean(bookDoc.toc?.length);
   const [activeTab, setActiveTab] = useState<SidebarTab>(hasTOC ? 'toc' : 'bookmarks');

@@ -28,6 +28,43 @@ export const addBookmarkToList = (
   bookmark: BookBookmark,
 ): BookBookmark[] => [bookmark, ...bookmarks];
 
+export const getActiveBookmarks = (bookmarks: BookBookmark[]): BookBookmark[] =>
+  bookmarks.filter((bookmark) => !bookmark.deletedAt);
+
+const getBookmarkTimestamp = (bookmark: BookBookmark): number =>
+  Math.max(bookmark.updatedAt, bookmark.deletedAt ?? 0);
+
+export const mergeBookmarks = (
+  localBookmarks: BookBookmark[],
+  remoteBookmarks: BookBookmark[],
+): BookBookmark[] => {
+  const merged = new Map<string, BookBookmark>();
+  const order: string[] = [];
+
+  for (const bookmark of localBookmarks) {
+    if (!merged.has(bookmark.id)) order.push(bookmark.id);
+    const existing = merged.get(bookmark.id);
+    if (!existing || getBookmarkTimestamp(bookmark) >= getBookmarkTimestamp(existing)) {
+      merged.set(bookmark.id, bookmark);
+    }
+  }
+
+  for (const bookmark of remoteBookmarks) {
+    if (!merged.has(bookmark.id)) order.push(bookmark.id);
+    const existing = merged.get(bookmark.id);
+    // The server wins ties so every device converges on the authoritative row.
+    if (!existing || getBookmarkTimestamp(bookmark) >= getBookmarkTimestamp(existing)) {
+      merged.set(bookmark.id, {
+        ...bookmark,
+        // fraction is a local display hint and has no book_notes column.
+        fraction: bookmark.fraction ?? existing?.fraction,
+      });
+    }
+  }
+
+  return order.map((id) => merged.get(id)!);
+};
+
 export const renameBookmarkInList = (
   bookmarks: BookBookmark[],
   id: string,
@@ -40,5 +77,11 @@ export const renameBookmarkInList = (
       : bookmark,
   );
 
-export const removeBookmarkFromList = (bookmarks: BookBookmark[], id: string): BookBookmark[] =>
-  bookmarks.filter((bookmark) => bookmark.id !== id);
+export const removeBookmarkFromList = (
+  bookmarks: BookBookmark[],
+  id: string,
+  now = Date.now(),
+): BookBookmark[] =>
+  bookmarks.map((bookmark) =>
+    bookmark.id === id ? { ...bookmark, updatedAt: now, deletedAt: now } : bookmark,
+  );

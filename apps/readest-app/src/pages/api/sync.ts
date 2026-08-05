@@ -3,12 +3,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { PostgrestError } from '@supabase/supabase-js';
 import { createSupabaseClient } from '@/utils/supabase';
 import type { BookDataRecord } from '@/types/book';
-import { transformBookConfigToDB } from '@/utils/transform';
-import { transformBookToDB } from '@/utils/transform';
+import {
+  transformBookConfigToDB,
+  transformBookNoteToDB,
+  transformBookToDB,
+} from '@/utils/transform';
 import { runMiddleware, corsAllMethods } from '@/utils/cors';
 import type { SyncData, SyncRecord, SyncResult, SyncType } from '@/libs/sync';
 import { validateUserAndToken } from '@/utils/access';
-import type { DBBook, DBBookConfig } from '@/types/records';
+import type { DBBook, DBBookConfig, DBBookNote } from '@/types/records';
 
 /**
  * Field-level last-writer-wins for a books row's cover: return the
@@ -31,11 +34,13 @@ export function resolveCoverMerge(
 const transformsToDB = {
   books: transformBookToDB,
   book_configs: transformBookConfigToDB,
+  book_notes: transformBookNoteToDB,
 };
 
 const DBSyncTypeMap = {
   books: 'books',
   book_configs: 'configs',
+  book_notes: 'notes',
 } as const;
 
 type TableName = keyof typeof transformsToDB;
@@ -62,7 +67,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: '"since" query parameter is required' }, { status: 400 });
   }
 
-  if (typeParam && typeParam !== 'books' && typeParam !== 'configs') {
+  if (typeParam && typeParam !== 'books' && typeParam !== 'configs' && typeParam !== 'notes') {
     return NextResponse.json({ error: 'Unsupported sync type' }, { status: 400 });
   }
 
@@ -74,10 +79,11 @@ export async function GET(req: NextRequest) {
   const sinceIso = since.toISOString();
 
   try {
-    const results: SyncResult = { books: [], configs: [] };
+    const results: SyncResult = { books: [], configs: [], notes: [] };
     const errors: Record<TableName, DBError | null> = {
       books: null,
       book_configs: null,
+      book_notes: null,
     };
 
     const queryTables = async (table: TableName, dedupeKeys?: (keyof BookDataRecord)[]) => {
@@ -194,7 +200,7 @@ export async function GET(req: NextRequest) {
           }
         }
       }
-      results.books = rows;
+      results.books = rows as SyncResult['books'];
     };
 
     if (!typeParam || typeParam === 'books') {
@@ -224,6 +230,11 @@ export async function GET(req: NextRequest) {
     }
     if (!typeParam || typeParam === 'configs') {
       await queryTables('book_configs').catch((err) => (errors['book_configs'] = err));
+    }
+    if (!typeParam || typeParam === 'notes') {
+      await queryTables('book_notes', ['book_hash', 'id']).catch(
+        (err) => (errors['book_notes'] = err),
+      );
     }
 
     const dbErrors = Object.values(errors).filter((err) => err !== null);
@@ -255,14 +266,10 @@ export async function POST(req: NextRequest) {
   const supabase = createSupabaseClient(token);
   const body = (await req.json()) as SyncData;
   const unsupportedBody = body as SyncData & Record<string, unknown>;
-  if (
-    'notes' in unsupportedBody ||
-    'statBooks' in unsupportedBody ||
-    'statPages' in unsupportedBody
-  ) {
+  if ('statBooks' in unsupportedBody || 'statPages' in unsupportedBody) {
     return NextResponse.json({ error: 'Unsupported sync data' }, { status: 400 });
   }
-  const { books = [], configs = [] } = body;
+  const { books = [], configs = [], notes = [] } = body;
 
   const BATCH_SIZE = 100;
   const upsertRecords = async (
@@ -320,8 +327,8 @@ export async function POST(req: NextRequest) {
       });
 
       // Separate into inserts and updates
-      const toInsert: (DBBook | DBBookConfig)[] = [];
-      const toUpdate: (DBBook | DBBookConfig)[] = [];
+      const toInsert: (DBBook | DBBookConfig | DBBookNote)[] = [];
+      const toUpdate: (DBBook | DBBookConfig | DBBookNote)[] = [];
       const batchAuthoritativeRecords: BookDataRecord[] = [];
 
       for (const { original, db: dbRec } of dbRecords) {
@@ -409,13 +416,15 @@ export async function POST(req: NextRequest) {
   };
 
   try {
-    const [booksResult, configsResult] = await Promise.all([
+    const [booksResult, configsResult, notesResult] = await Promise.all([
       upsertRecords('books', ['book_hash'], books as BookDataRecord[]),
       upsertRecords('book_configs', ['book_hash'], configs as BookDataRecord[]),
+      upsertRecords('book_notes', ['book_hash', 'id'], notes as BookDataRecord[]),
     ]);
 
     if (booksResult?.error) throw new Error(booksResult.error);
     if (configsResult?.error) throw new Error(configsResult.error);
+    if (notesResult?.error) throw new Error(notesResult.error);
 
     // Piggyback the per-book reading progress from the configs push onto the
     // matching `books` row. Other devices' library pull-to-refresh reads
@@ -475,6 +484,7 @@ export async function POST(req: NextRequest) {
       {
         books: booksResult?.data || [],
         configs: configsResult?.data || [],
+        notes: notesResult?.data || [],
       },
       { status: 200 },
     );

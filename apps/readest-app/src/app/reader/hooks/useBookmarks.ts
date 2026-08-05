@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import { useEnv } from '@/context/EnvContext';
 import { useBookDataStore } from '@/store/bookDataStore';
@@ -7,6 +7,7 @@ import { BookBookmark, BookProgress } from '@/types/book';
 import {
   addBookmarkToList,
   createBookmark,
+  getActiveBookmarks,
   removeBookmarkFromList,
   renameBookmarkInList,
 } from '@/utils/bookmark';
@@ -16,9 +17,10 @@ const EMPTY_BOOKMARKS: BookBookmark[] = [];
 export const useBookmarks = (bookKey: string) => {
   const { envConfig } = useEnv();
   const bookId = bookKey.split('-')[0]!;
-  const bookmarks = useBookDataStore(
+  const storedBookmarks = useBookDataStore(
     (state) => state.booksData[bookId]?.config?.bookmarks ?? EMPTY_BOOKMARKS,
   );
+  const bookmarks = useMemo(() => getActiveBookmarks(storedBookmarks), [storedBookmarks]);
   const getConfig = useBookDataStore((state) => state.getConfig);
   const setConfig = useBookDataStore((state) => state.setConfig);
   const saveConfig = useBookDataStore((state) => state.saveConfig);

@@ -4,8 +4,10 @@ import { BookProgress } from '@/types/book';
 import {
   addBookmarkToList,
   createBookmark,
+  getActiveBookmarks,
   limitBookmarkTitle,
   MAX_BOOKMARK_TITLE_LENGTH,
+  mergeBookmarks,
   normalizeBookmarkTitle,
   removeBookmarkFromList,
   renameBookmarkInList,
@@ -62,6 +64,20 @@ describe('bookmark helpers', () => {
 
     expect(renamed[0]).toMatchObject({ title: 'Renamed', updatedAt: 3000 });
     expect(renamed[1]).toBe(second);
-    expect(removeBookmarkFromList(renamed, first.id)).toEqual([second]);
+    const removed = removeBookmarkFromList(renamed, first.id, 4000);
+    expect(removed[0]).toMatchObject({ id: first.id, updatedAt: 4000, deletedAt: 4000 });
+    expect(getActiveBookmarks(removed)).toEqual([second]);
+  });
+
+  it('merges bookmarks by id using the latest update or deletion', () => {
+    const local = createBookmark(progress, 'Local title', 1000);
+    const remote = { ...local, title: 'Remote title', updatedAt: 2000 };
+    const remoteOnly = createBookmark(progress, 'Remote only', 3000);
+
+    expect(mergeBookmarks([local], [remote, remoteOnly])).toEqual([remote, remoteOnly]);
+
+    const deleted = removeBookmarkFromList([remote], remote.id, 4000)[0]!;
+    expect(mergeBookmarks([remote], [deleted])).toEqual([deleted]);
+    expect(getActiveBookmarks([deleted])).toEqual([]);
   });
 });

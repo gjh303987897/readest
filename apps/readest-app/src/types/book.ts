@@ -264,6 +264,26 @@ export interface BookBookmark {
   fraction?: number;
   createdAt: number;
   updatedAt: number;
+  deletedAt?: number | null;
+}
+
+export interface BookNote {
+  bookHash: string;
+  metaHash?: string;
+  id: string;
+  type: 'bookmark' | 'annotation';
+  cfi?: string;
+  xpointer0?: string;
+  xpointer1?: string;
+  text?: string;
+  style?: string;
+  color?: string;
+  note?: string;
+  page?: number;
+  global?: boolean;
+  createdAt: number;
+  updatedAt: number;
+  deletedAt?: number | null;
 }
 
 export type SearchMode = 'contains' | 'whole-words' | 'regex' | 'nearby-words';
