@@ -7,6 +7,7 @@ import {
   normalizeMeloTTSDevice,
   normalizeTTSRate,
   normalizeTTSEngine,
+  resolveTTSEngineForPlatform,
 } from '@/services/tts/ttsEngine';
 import { getMeloTTSModelCatalog, resolveMeloTTSModel } from '@/services/tts/meloTTSModels';
 
@@ -14,6 +15,10 @@ describe('TTS engine selection', () => {
   it('exposes the supported engines in settings order', () => {
     expect(getTTSEngineOptions().map(({ value }) => value)).toEqual(['system', 'piper', 'melotts']);
     expect(getTTSEngineOptions().at(-1)?.label).toBe('MeloTTS');
+  });
+
+  it('exposes only the system engine on mobile', () => {
+    expect(getTTSEngineOptions(true).map(({ value }) => value)).toEqual(['system']);
   });
 
   it('exposes reading speed choices and normalizes old or invalid settings', () => {
@@ -63,6 +68,12 @@ describe('TTS engine selection', () => {
     expect(normalizeTTSEngine('melotts')).toBe('melotts');
     expect(normalizeTTSEngine('system')).toBe('system');
     expect(normalizeTTSEngine(undefined)).toBe('piper');
+  });
+
+  it('forces persisted local engines to the system engine on mobile', () => {
+    expect(resolveTTSEngineForPlatform('piper', true)).toBe('system');
+    expect(resolveTTSEngineForPlatform('melotts', true)).toBe('system');
+    expect(resolveTTSEngineForPlatform('melotts', false)).toBe('melotts');
   });
 
   it('does not impose the Chinese-only restriction on the other engines', () => {

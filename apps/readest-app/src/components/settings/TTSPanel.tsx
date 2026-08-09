@@ -36,8 +36,8 @@ import {
   getTTSEngineOptions,
   getTTSRateOptions,
   normalizeMeloTTSDevice,
-  normalizeTTSEngine,
   normalizeTTSRate,
+  resolveTTSEngineForPlatform,
 } from '@/services/tts/ttsEngine';
 import type { SettingsPanelPanelProp } from './SettingsDialog';
 import { BoxedList, SettingsRow, Tips } from './primitives';
@@ -97,17 +97,18 @@ const TTSChoiceMenu = <T extends string | number>({
 
 const TTSPanel: React.FC<SettingsPanelPanelProp> = () => {
   const _ = useTranslation();
-  const { envConfig } = useEnv();
+  const { envConfig, appService } = useEnv();
   const settings = useSettingsStore((state) => state.settings);
   const storedTTSEngine = settings.ttsEngine as string | undefined;
-  const ttsEngine = normalizeTTSEngine(storedTTSEngine);
+  const systemOnly = appService === null || appService.isMobileApp;
+  const ttsEngine = resolveTTSEngineForPlatform(storedTTSEngine, systemOnly);
   const ttsRate = normalizeTTSRate(settings.ttsRate);
   const meloDevice = normalizeMeloTTSDevice(settings.ttsMeloDevice);
   const voices = useMemo(() => getPiperVoiceCatalog(), []);
   const models = useMemo(() => getMeloTTSModelCatalog(), []);
   const engineOptions = useMemo(
-    () => getTTSEngineOptions().map(({ value, label }) => ({ value, label: _(label) })),
-    [_],
+    () => getTTSEngineOptions(systemOnly).map(({ value, label }) => ({ value, label: _(label) })),
+    [_, systemOnly],
   );
   const selectedEngine =
     engineOptions.find(({ value }) => value === ttsEngine) ?? engineOptions[0]!;
@@ -238,25 +239,32 @@ const TTSPanel: React.FC<SettingsPanelPanelProp> = () => {
     <div className='my-4 space-y-6'>
       <BoxedList title={_('Speech engine')} data-setting-id='settings.tts.engine'>
         <SettingsRow label={_('TTS engine')} description={engineDescription}>
-          <Dropdown
-            label={_('TTS engine')}
-            showTooltip={false}
-            containerClassName='w-32 max-w-[52%] min-w-0 justify-end [&>div]:max-w-full [&>div]:min-w-0'
-            className='dropdown-end'
-            buttonClassName='settings-content flex h-9 min-h-9 w-full max-w-full min-w-0 items-center gap-1 overflow-hidden rounded-md px-2 font-normal hover:bg-base-200/70 focus-visible:outline-none'
-            toggleButton={
-              <>
-                <span className='min-w-0 truncate'>{selectedEngine.label}</span>
-                <ChevronDown className='text-base-content/55 h-4 w-4 shrink-0' aria-hidden='true' />
-              </>
-            }
-          >
-            <TTSChoiceMenu
-              options={engineOptions}
-              value={ttsEngine}
-              onChange={handleEngineChange}
-            />
-          </Dropdown>
+          {systemOnly ? (
+            <span className='settings-content px-2'>{selectedEngine.label}</span>
+          ) : (
+            <Dropdown
+              label={_('TTS engine')}
+              showTooltip={false}
+              containerClassName='w-32 max-w-[52%] min-w-0 justify-end [&>div]:max-w-full [&>div]:min-w-0'
+              className='dropdown-end'
+              buttonClassName='settings-content flex h-9 min-h-9 w-full max-w-full min-w-0 items-center gap-1 overflow-hidden rounded-md px-2 font-normal hover:bg-base-200/70 focus-visible:outline-none'
+              toggleButton={
+                <>
+                  <span className='min-w-0 truncate'>{selectedEngine.label}</span>
+                  <ChevronDown
+                    className='text-base-content/55 h-4 w-4 shrink-0'
+                    aria-hidden='true'
+                  />
+                </>
+              }
+            >
+              <TTSChoiceMenu
+                options={engineOptions}
+                value={ttsEngine}
+                onChange={handleEngineChange}
+              />
+            </Dropdown>
+          )}
         </SettingsRow>
         <SettingsRow label={_('Reading speed')}>
           <Dropdown
@@ -415,18 +423,22 @@ const TTSPanel: React.FC<SettingsPanelPanelProp> = () => {
         </p>
       )}
 
-      <Tips title={_('Tips')}>
-        <li>
-          {_('Downloaded voice and model packs are stored locally and can be removed at any time.')}
-        </li>
-        {ttsEngine === 'melotts' ? (
-          <li>{_('Only the ZH model supports mixed Chinese and English text.')}</li>
-        ) : (
+      {ttsEngine !== 'system' && (
+        <Tips title={_('Tips')}>
           <li>
-            {_('A voice is downloaded automatically when you start reading aloud if needed.')}
+            {_(
+              'Downloaded voice and model packs are stored locally and can be removed at any time.',
+            )}
           </li>
-        )}
-      </Tips>
+          {ttsEngine === 'melotts' ? (
+            <li>{_('Only the ZH model supports mixed Chinese and English text.')}</li>
+          ) : (
+            <li>
+              {_('A voice is downloaded automatically when you start reading aloud if needed.')}
+            </li>
+          )}
+        </Tips>
+      )}
     </div>
   );
 };

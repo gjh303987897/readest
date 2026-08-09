@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   removeMeloTTSModel: vi.fn(),
   saveSysSettings: vi.fn(),
   onRegisterReset: vi.fn(),
+  isMobileApp: false,
 }));
 
 const envConfig = {};
@@ -20,7 +21,7 @@ vi.mock('@/hooks/useTranslation', () => ({
 }));
 
 vi.mock('@/context/EnvContext', () => ({
-  useEnv: () => ({ envConfig, appService: null }),
+  useEnv: () => ({ envConfig, appService: { isMobileApp: h.isMobileApp } }),
 }));
 
 vi.mock('@/helpers/settings', () => ({
@@ -76,6 +77,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import type { SystemSettings } from '@/types/settings';
 
 beforeEach(() => {
+  h.isMobileApp = false;
   h.onRegisterReset.mockClear();
   h.getStoredPiperVoiceIds.mockReset().mockResolvedValue(['en_US-amy-medium']);
   h.downloadPiperVoice.mockReset().mockImplementation(async (_voiceId, onProgress) => {
@@ -104,6 +106,33 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('TTSPanel', () => {
+  it('allows only the system engine on mobile without overwriting the desktop preference', async () => {
+    h.isMobileApp = true;
+    useSettingsStore.setState({
+      settings: {
+        ttsEngine: 'melotts',
+        ttsRate: 1,
+        ttsMeloDevice: 'gpu',
+      } as SystemSettings,
+    });
+
+    render(
+      <DropdownProvider>
+        <TTSPanel bookKey='' onRegisterReset={h.onRegisterReset} />
+      </DropdownProvider>,
+    );
+
+    expect(screen.getByText('System default')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'TTS engine' })).toBeNull();
+    expect(screen.queryByText('Piper')).toBeNull();
+    expect(screen.queryByText('MeloTTS')).toBeNull();
+    expect(screen.queryByRole('radiogroup', { name: 'Inference device' })).toBeNull();
+    expect(await screen.findByText('System voices')).toBeTruthy();
+    expect(h.getStoredPiperVoiceIds).not.toHaveBeenCalled();
+    expect(h.getStoredMeloTTSModelCodes).not.toHaveBeenCalled();
+    expect(h.saveSysSettings).not.toHaveBeenCalledWith(envConfig, 'ttsEngine', 'system');
+  });
+
   it('selects and persists the reading speed', async () => {
     render(
       <DropdownProvider>

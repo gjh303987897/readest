@@ -6,6 +6,7 @@ import { useReaderStore } from '@/store/readerStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useEnv } from '@/context/EnvContext';
 import { eventDispatcher } from '@/utils/event';
 import {
   getPiperReaderController,
@@ -29,8 +30,8 @@ import { resolveMeloTTSModel } from '@/services/tts/meloTTSModels';
 import {
   isTTSEngineLanguageCompatible,
   normalizeMeloTTSDevice,
-  normalizeTTSEngine,
   normalizeTTSRate,
+  resolveTTSEngineForPlatform,
 } from '@/services/tts/ttsEngine';
 import { TTSSelectionRequiredError } from '@/services/tts/ttsReaderUtils';
 
@@ -53,13 +54,17 @@ const getIdleSnapshot = () => IDLE_SNAPSHOT;
 
 const PiperTTSButton: React.FC<PiperTTSButtonProps> = ({ bookKey }) => {
   const _ = useTranslation();
+  const { appService } = useEnv();
   const iconSize = useResponsiveSize(18);
   const bookData = useBookDataStore((state) => state.getBookData(bookKey));
   const view = useReaderStore((state) => state.viewStates[bookKey]?.view);
   const storedTTSEngine = useSettingsStore((state) => state.settings.ttsEngine) as
     | string
     | undefined;
-  const ttsEngine = normalizeTTSEngine(storedTTSEngine);
+  const ttsEngine = resolveTTSEngineForPlatform(
+    storedTTSEngine,
+    appService === null || appService.isMobileApp,
+  );
   const ttsRate = normalizeTTSRate(
     useSettingsStore((state) => state.settings.ttsRate as number | undefined),
   );

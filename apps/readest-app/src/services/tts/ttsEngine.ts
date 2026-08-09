@@ -14,8 +14,10 @@ const TTS_ENGINE_OPTIONS: readonly TTSEngineOption[] = [
 
 const TTS_RATE_OPTIONS = [0.8, 0.9, 1, 1.1, 1.2, 1.5, 2] as const;
 
-export const getTTSEngineOptions = (): TTSEngineOption[] =>
-  TTS_ENGINE_OPTIONS.map((option) => ({ ...option }));
+export const getTTSEngineOptions = (systemOnly = false): TTSEngineOption[] =>
+  TTS_ENGINE_OPTIONS.filter(({ value }) => !systemOnly || value === 'system').map((option) => ({
+    ...option,
+  }));
 
 export const getTTSRateOptions = (): number[] => [...TTS_RATE_OPTIONS];
 
@@ -35,6 +37,11 @@ export const normalizeTTSEngine = (engine: string | undefined): TTSEngine => {
   if (engine === 'system' || engine === 'piper' || engine === 'melotts') return engine;
   return 'piper';
 };
+
+export const resolveTTSEngineForPlatform = (
+  engine: string | undefined,
+  isMobileApp: boolean,
+): TTSEngine => (isMobileApp ? 'system' : normalizeTTSEngine(engine));
 
 export const isTTSEngineLanguageCompatible = (
   engine: TTSEngine,
