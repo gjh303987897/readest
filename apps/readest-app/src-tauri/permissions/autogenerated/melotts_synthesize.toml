@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-melotts-synthesize"
+description = "Enables the melotts_synthesize command without any pre-configured scope."
+commands.allow = ["melotts_synthesize"]
+
+[[permission]]
+identifier = "deny-melotts-synthesize"
+description = "Denies the melotts_synthesize command without any pre-configured scope."
+commands.deny = ["melotts_synthesize"]

@@ -26,6 +26,7 @@ mod dir_scanner;
 mod epub_parser;
 #[cfg(target_os = "macos")]
 mod macos;
+mod melotts;
 mod mobi_parser;
 mod parser_common;
 mod range_file;
@@ -242,6 +243,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             download_file,
             upload_file,
+            melotts::melotts_synthesize,
             get_executable_dir,
             allow_paths_in_scopes,
             dir_scanner::read_dir,
@@ -253,6 +255,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             macos::traffic_light::set_traffic_lights,
         ])
+        .manage(melotts::MeloTtsState::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_persisted_scope::init())
         .plugin(tauri_plugin_opener::init())

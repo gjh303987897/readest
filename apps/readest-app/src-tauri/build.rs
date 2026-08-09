@@ -25,6 +25,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "download_file",
             "upload_file",
+            "melotts_synthesize",
             "get_executable_dir",
             "allow_paths_in_scopes",
             "read_dir",

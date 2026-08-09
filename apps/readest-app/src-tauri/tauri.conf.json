@@ -50,7 +50,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [],
+    "resources": {
+      "resources/melotts_server.py": "melotts/melotts_server.py"
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"

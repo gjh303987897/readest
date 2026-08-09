@@ -32,7 +32,7 @@ vi.mock('@/utils/style', () => ({
   getStyles: vi.fn(() => ''),
 }));
 
-import { saveViewSettings } from '@/helpers/settings';
+import { saveSysSettings, saveViewSettings } from '@/helpers/settings';
 import { useSettingsStore } from '@/store/settingsStore';
 import type { EnvConfigType } from '@/services/environment';
 import type { SystemSettings } from '@/types/settings';
@@ -41,6 +41,7 @@ const envConfig = {} as EnvConfigType;
 
 const makeSettings = (): SystemSettings =>
   ({
+    ttsEngine: 'piper',
     globalViewSettings: { userStylesheet: '', userUIStylesheet: '' },
   }) as unknown as SystemSettings;
 
@@ -116,5 +117,23 @@ describe('saveViewSettings', () => {
     // into the cross-device globals.
     expect(referenceChanges).toHaveLength(0);
     expect(useSettingsStore.getState().settings).toBe(initial);
+  });
+});
+
+describe('saveSysSettings', () => {
+  test('swaps the settings reference so engine subscribers update immediately', async () => {
+    const initial = useSettingsStore.getState().settings;
+    const saveSettingsMock = vi.fn(async () => {});
+    useSettingsStore.setState({
+      saveSettings: saveSettingsMock,
+    } as unknown as ReturnType<typeof useSettingsStore.getState>);
+
+    await saveSysSettings(envConfig, 'ttsEngine', 'system');
+
+    const next = useSettingsStore.getState().settings;
+    expect(next).not.toBe(initial);
+    expect(next.ttsEngine).toBe('system');
+    expect(initial.ttsEngine).toBe('piper');
+    expect(saveSettingsMock).toHaveBeenCalledWith(envConfig, next);
   });
 });

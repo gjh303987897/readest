@@ -140,6 +140,7 @@
     "native-bridge:default",
     "allow-download-file",
     "allow-upload-file",
+    "allow-melotts-synthesize",
     "allow-get-executable-dir",
     "allow-allow-paths-in-scopes",
     "allow-read-dir",

@@ -42,6 +42,7 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   screenBrightness: -1, // -1~100, -1 for system default
   autoScreenBrightness: true,
   swipeBrightnessGesture: true,
+  ttsEngine: 'piper',
   hardwarePageTurner: {
     enabled: false,
     bindings: {

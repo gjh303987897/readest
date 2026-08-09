@@ -6,6 +6,18 @@ export const NOTE_PREFIX = 'foliate-note:';
 
 type RangeAnchor = (doc: Document) => Range;
 
+export interface FoliateTTS {
+  start: () => string | undefined;
+  resume: () => string | undefined;
+  next: (paused?: boolean) => string | undefined;
+  prev: (paused?: boolean) => string | undefined;
+  nextMark?: (paused?: boolean) => string | undefined;
+  prevMark?: (paused?: boolean) => string | undefined;
+  from: (range: Range) => string | undefined;
+  getLastRange: () => Range | undefined;
+  setMark: (mark: string) => Range | undefined;
+}
+
 export interface Renderer extends HTMLElement {
   scrolled?: boolean;
   scrollLocked: boolean;
@@ -67,6 +79,12 @@ export interface FoliateView extends HTMLElement {
   open: (book: BookDoc) => Promise<void>;
   close: () => void;
   init: (options: { lastLocation: string }) => void;
+  initTTS: (
+    granularity?: 'word' | 'sentence',
+    nodeFilter?: (node: Node) => number,
+    highlighter?: (range: Range) => void,
+  ) => Promise<void>;
+  tts?: FoliateTTS;
   goTo: (href: string) => void;
   goToFraction: (fraction: number) => void;
   getSectionFractions: () => number[];

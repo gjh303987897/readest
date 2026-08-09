@@ -19,6 +19,7 @@ import SidebarToggler from './SidebarToggler';
 import SettingsToggler from './SettingsToggler';
 import ViewMenu from './ViewMenu';
 import BookmarkButton from './BookmarkButton';
+import PiperTTSButton from './PiperTTSButton';
 
 interface HeaderBarProps {
   bookKey: string;
@@ -200,6 +201,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
               <VscLibrary size={iconSize18} className='fill-base-content' />
             </button>
             <BookmarkButton bookKey={bookKey} onOpenChange={setIsBookmarkDialogOpen} />
+            <PiperTTSButton bookKey={bookKey} />
           </div>
         </div>
 

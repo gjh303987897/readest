@@ -1,6 +1,15 @@
 import clsx from 'clsx';
 import React, { useMemo, useState } from 'react';
-import { LayoutGrid, MousePointer2, Palette, RotateCcw, Settings2, Type, X } from 'lucide-react';
+import {
+  LayoutGrid,
+  MousePointer2,
+  Palette,
+  RotateCcw,
+  Settings2,
+  Type,
+  Volume2,
+  X,
+} from 'lucide-react';
 
 import { useEnv } from '@/context/EnvContext';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -11,8 +20,9 @@ import LayoutPanel from './LayoutPanel';
 import ThemePanel from './ThemePanel';
 import ControlPanel from './ControlPanel';
 import GeneralPanel from './GeneralPanel';
+import TTSPanel from './TTSPanel';
 
-export type SettingsPanelType = 'General' | 'Font' | 'Layout' | 'Theme' | 'Control';
+export type SettingsPanelType = 'General' | 'Font' | 'Layout' | 'Theme' | 'Control' | 'TTS';
 
 export type SettingsPanelPanelProp = {
   bookKey: string;
@@ -34,6 +44,7 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
       { id: 'Layout' as const, label: _('Layout'), Icon: LayoutGrid },
       { id: 'Theme' as const, label: _('Theme'), Icon: Palette },
       { id: 'Control' as const, label: _('Behavior'), Icon: MousePointer2 },
+      { id: 'TTS' as const, label: _('TTS'), Icon: Volume2 },
     ],
     [_],
   );
@@ -91,15 +102,17 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
               </button>
             ))}
           </div>
-          <button
-            type='button'
-            className='btn btn-ghost btn-sm btn-square'
-            title={_('Reset {{settings}}', { settings: currentLabel })}
-            aria-label={_('Reset {{settings}}', { settings: currentLabel })}
-            onClick={() => resetFunctions[activePanel]?.()}
-          >
-            <RotateCcw className='h-4 w-4' />
-          </button>
+          {activePanel !== 'TTS' && (
+            <button
+              type='button'
+              className='btn btn-ghost btn-sm btn-square'
+              title={_('Reset {{settings}}', { settings: currentLabel })}
+              aria-label={_('Reset {{settings}}', { settings: currentLabel })}
+              onClick={() => resetFunctions[activePanel]?.()}
+            >
+              <RotateCcw className='h-4 w-4' />
+            </button>
+          )}
           <button
             type='button'
             className='btn btn-ghost btn-sm btn-square'
@@ -136,6 +149,9 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
             bookKey={bookKey}
             onRegisterReset={(reset) => registerReset('Control', reset)}
           />
+        )}
+        {activePanel === 'TTS' && (
+          <TTSPanel onRegisterReset={(reset) => registerReset('TTS', reset)} bookKey='' />
         )}
       </div>
     </Dialog>

@@ -2,6 +2,8 @@ import { CustomTheme } from '@/styles/themes';
 import { ViewSettings } from './book';
 
 export type ThemeType = 'light' | 'dark' | 'auto';
+export type TTSEngine = 'system' | 'piper' | 'melotts';
+
 export interface ReadSettings {
   sideBarWidth: string;
   isSideBarPinned: boolean;
@@ -40,6 +42,7 @@ export interface SystemSettings {
   screenBrightness: number;
   autoScreenBrightness: boolean;
   swipeBrightnessGesture: boolean;
+  ttsEngine: TTSEngine;
   hardwarePageTurner: HardwarePageTurnerSettings;
   alwaysShowStatusBar: boolean;
   lastSyncedAtBooks: number;
