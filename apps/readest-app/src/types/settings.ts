@@ -3,6 +3,7 @@ import { ViewSettings } from './book';
 
 export type ThemeType = 'light' | 'dark' | 'auto';
 export type TTSEngine = 'system' | 'piper' | 'melotts';
+export type MeloTTSDevice = 'cpu' | 'gpu';
 
 export interface ReadSettings {
   sideBarWidth: string;
@@ -43,6 +44,8 @@ export interface SystemSettings {
   autoScreenBrightness: boolean;
   swipeBrightnessGesture: boolean;
   ttsEngine: TTSEngine;
+  ttsRate: number;
+  ttsMeloDevice: MeloTTSDevice;
   hardwarePageTurner: HardwarePageTurnerSettings;
   alwaysShowStatusBar: boolean;
   lastSyncedAtBooks: number;

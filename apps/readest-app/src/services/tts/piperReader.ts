@@ -1,5 +1,6 @@
 import type { BookDoc } from '@/libs/document';
 import type { FoliateTTS, FoliateView } from '@/types/view';
+import { normalizeTTSRate } from './ttsEngine';
 import {
   getNextSectionIndex,
   getSelectedSpeechSegments,
@@ -235,11 +236,13 @@ class PiperReaderController {
   private sessionPromise: Promise<PiperSession> | null = null;
   private preloadPromise: Promise<void> | null = null;
   private resolvePlayback: (() => void) | null = null;
+  private sessionGeneration = 0;
 
   constructor(
     private readonly bookKey: string,
     private readonly view: FoliateView,
     private readonly language: string | string[] | undefined,
+    private readonly rate: number,
   ) {}
 
   getSnapshot = (): PiperPlaybackSnapshot => this.snapshot;
@@ -249,8 +252,8 @@ class PiperReaderController {
     return () => this.listeners.delete(listener);
   };
 
-  isFor(view: FoliateView, language: string | string[] | undefined): boolean {
-    return this.view === view && this.language === language;
+  isFor(view: FoliateView, language: string | string[] | undefined, rate: number): boolean {
+    return this.view === view && this.language === language && this.rate === rate;
   }
 
   async preload(): Promise<void> {
@@ -273,9 +276,8 @@ class PiperReaderController {
 
     try {
       await this.preloadPromise;
-    } catch (error) {
+    } finally {
       this.preloadPromise = null;
-      throw error;
     }
   }
 
@@ -293,14 +295,19 @@ class PiperReaderController {
 
   stop(): void {
     this.operation += 1;
+    this.sessionGeneration += 1;
     this.resolvePlayback?.();
     this.resolvePlayback = null;
     this.audio?.pause();
     if (this.audio) {
       this.audio.removeAttribute('src');
       this.audio.load();
+      this.audio = null;
     }
     this.revokeObjectUrl();
+    this.session = null;
+    this.sessionPromise = null;
+    if (this.piper) this.piper.TtsSession._instance = null;
     this.tts = null;
     if (activeController === this) activeController = null;
     this.setSnapshot({ status: 'idle', progress: 0, error: null });
@@ -405,6 +412,7 @@ class PiperReaderController {
     this.revokeObjectUrl();
     this.objectUrl = URL.createObjectURL(blob);
     audio.src = this.objectUrl;
+    audio.playbackRate = this.rate;
     this.setSnapshot({ status: 'playing', progress: 1 });
 
     await new Promise<void>((resolve, reject) => {
@@ -436,7 +444,8 @@ class PiperReaderController {
     if (this.session?.voiceId === voiceId && this.session.ready) return this.session;
     if (this.sessionPromise) return this.sessionPromise;
 
-    this.sessionPromise = (async () => {
+    const generation = this.sessionGeneration;
+    const task = (async () => {
       await this.preloadVoice(voiceId);
       if (!this.piper) throw new Error('Piper runtime failed to load');
 
@@ -449,14 +458,19 @@ class PiperReaderController {
         allowLocalModels: true,
         fallbackStrategy: 'cdn',
       });
-      this.session = session;
+      if (generation === this.sessionGeneration) {
+        this.session = session;
+      } else if (TtsSession._instance === session) {
+        TtsSession._instance = null;
+      }
       return session;
     })();
+    this.sessionPromise = task;
 
     try {
-      return await this.sessionPromise;
+      return await task;
     } finally {
-      this.sessionPromise = null;
+      if (this.sessionPromise === task) this.sessionPromise = null;
     }
   }
 
@@ -485,11 +499,18 @@ export const getPiperReaderController = (
   bookKey: string,
   view: FoliateView,
   bookDoc: BookDoc,
+  rate = 1,
 ): PiperReaderController => {
+  const normalizedRate = normalizeTTSRate(rate);
   const existing = controllers.get(bookKey);
-  if (existing?.isFor(view, bookDoc.metadata.language)) return existing;
+  if (existing?.isFor(view, bookDoc.metadata.language, normalizedRate)) return existing;
   existing?.dispose();
-  const controller = new PiperReaderController(bookKey, view, bookDoc.metadata.language);
+  const controller = new PiperReaderController(
+    bookKey,
+    view,
+    bookDoc.metadata.language,
+    normalizedRate,
+  );
   controllers.set(bookKey, controller);
   return controller;
 };

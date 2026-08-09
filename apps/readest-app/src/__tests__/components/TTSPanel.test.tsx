@@ -92,12 +92,57 @@ beforeEach(() => {
       settings: { ...state.settings, [key]: value },
     }));
   });
-  useSettingsStore.setState({ settings: { ttsEngine: 'piper' } as SystemSettings });
+  useSettingsStore.setState({
+    settings: {
+      ttsEngine: 'piper',
+      ttsRate: 1,
+      ttsMeloDevice: 'cpu',
+    } as SystemSettings,
+  });
 });
 
 afterEach(cleanup);
 
 describe('TTSPanel', () => {
+  it('selects and persists the reading speed', async () => {
+    render(
+      <DropdownProvider>
+        <TTSPanel bookKey='' onRegisterReset={h.onRegisterReset} />
+      </DropdownProvider>,
+    );
+
+    const selector = screen.getByRole('button', { name: 'Reading speed' });
+    expect(selector.textContent).toContain('1x');
+    expect(selector.className).toContain('overflow-hidden');
+    fireEvent.click(selector);
+    fireEvent.click(screen.getByRole('menuitem', { name: /1.1x/ }));
+
+    await waitFor(() => expect(h.saveSysSettings).toHaveBeenCalledWith(envConfig, 'ttsRate', 1.1));
+  });
+
+  it('selects the MeloTTS inference device', async () => {
+    useSettingsStore.setState({
+      settings: {
+        ttsEngine: 'melotts',
+        ttsRate: 1,
+        ttsMeloDevice: 'cpu',
+      } as SystemSettings,
+    });
+    render(
+      <DropdownProvider>
+        <TTSPanel bookKey='' onRegisterReset={h.onRegisterReset} />
+      </DropdownProvider>,
+    );
+
+    const deviceControl = screen.getByRole('radiogroup', { name: 'Inference device' });
+    expect(deviceControl.className).toContain('eink-bordered');
+    fireEvent.click(screen.getByRole('radio', { name: 'GPU' }));
+
+    await waitFor(() =>
+      expect(h.saveSysSettings).toHaveBeenCalledWith(envConfig, 'ttsMeloDevice', 'gpu'),
+    );
+  });
+
   it('selects and persists the global TTS engine', async () => {
     render(
       <DropdownProvider>

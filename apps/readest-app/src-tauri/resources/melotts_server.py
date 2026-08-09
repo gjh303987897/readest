@@ -8,6 +8,8 @@ import traceback
 import types
 from pathlib import Path
 
+import numpy as np
+
 
 models = {}
 
@@ -19,6 +21,44 @@ DEFAULT_SPEAKERS = {
     "JP": "JP",
     "KR": "KR",
 }
+
+
+def resolve_device(requested_device):
+    if requested_device == "cpu":
+        return "cpu"
+    if requested_device != "gpu":
+        raise RuntimeError("MeloTTS device must be cpu or gpu")
+
+    import torch
+
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    raise RuntimeError(
+        "GPU inference is unavailable. Install a CUDA- or MPS-enabled PyTorch runtime."
+    )
+
+
+def trim_and_pad_sentence(audio, sample_rate):
+    audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+    if audio.size == 0:
+        return audio
+
+    peak = float(np.max(np.abs(audio)))
+    if peak <= 1e-6:
+        return np.zeros(int(sample_rate * 0.09), dtype=np.float32)
+
+    threshold = max(peak * 0.008, 1e-4)
+    voiced = np.flatnonzero(np.abs(audio) >= threshold)
+    if voiced.size == 0:
+        return np.zeros(int(sample_rate * 0.09), dtype=np.float32)
+
+    edge_padding = int(sample_rate * 0.02)
+    start = max(0, int(voiced[0]) - edge_padding)
+    end = min(audio.size, int(voiced[-1]) + edge_padding + 1)
+    sentence_pause = np.zeros(int(sample_rate * 0.09), dtype=np.float32)
+    return np.concatenate((audio[start:end], sentence_pause))
 
 
 def configure_unidic():
@@ -118,12 +158,15 @@ def configure_local_model_loader():
 def synthesize(request):
     language_code = request["language_code"]
     text = request["text"].strip()
+    speed = float(request.get("speed", 1.0))
+    device = resolve_device(request.get("device", "cpu"))
     model_dir = Path(request["model_dir"])
     config_path = model_dir / "config.json"
     checkpoint_path = model_dir / "checkpoint.pth"
 
     with contextlib.redirect_stdout(sys.stderr):
-        if language_code not in models:
+        model_key = (language_code, device)
+        if model_key not in models:
             try:
                 configure_unidic()
                 configure_lazy_language_imports()
@@ -134,17 +177,24 @@ def synthesize(request):
                     "MeloTTS Python package is missing. Install melotts==0.1.2 in the Readest runtime."
                 ) from error
 
-            models[language_code] = TTS(
+            models[model_key] = TTS(
                 language=language_code,
-                device="cpu",
+                device=device,
                 use_hf=False,
                 config_path=str(config_path),
                 ckpt_path=str(checkpoint_path),
             )
 
-        model = models[language_code]
+        model = models[model_key]
         speaker_id = model.hps.data.spk2id[DEFAULT_SPEAKERS[language_code]]
-        audio = model.tts_to_file(text, speaker_id, output_path=None, quiet=True)
+        audio = model.tts_to_file(
+            text,
+            speaker_id,
+            output_path=None,
+            speed=speed,
+            quiet=True,
+        )
+        audio = trim_and_pad_sentence(audio, model.hps.data.sampling_rate)
 
         import soundfile
 

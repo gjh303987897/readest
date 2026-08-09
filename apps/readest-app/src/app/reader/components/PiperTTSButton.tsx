@@ -26,7 +26,12 @@ import {
   type SystemReaderController,
 } from '@/services/tts/systemReader';
 import { resolveMeloTTSModel } from '@/services/tts/meloTTSModels';
-import { isTTSEngineLanguageCompatible, normalizeTTSEngine } from '@/services/tts/ttsEngine';
+import {
+  isTTSEngineLanguageCompatible,
+  normalizeMeloTTSDevice,
+  normalizeTTSEngine,
+  normalizeTTSRate,
+} from '@/services/tts/ttsEngine';
 import { TTSSelectionRequiredError } from '@/services/tts/ttsReaderUtils';
 
 interface PiperTTSButtonProps {
@@ -55,6 +60,12 @@ const PiperTTSButton: React.FC<PiperTTSButtonProps> = ({ bookKey }) => {
     | string
     | undefined;
   const ttsEngine = normalizeTTSEngine(storedTTSEngine);
+  const ttsRate = normalizeTTSRate(
+    useSettingsStore((state) => state.settings.ttsRate as number | undefined),
+  );
+  const meloDevice = normalizeMeloTTSDevice(
+    useSettingsStore((state) => state.settings.ttsMeloDevice as string | undefined),
+  );
   const book = bookData?.book;
   const bookDoc = bookData?.bookDoc;
   const supported = !!book && isPiperTextFormat(book.format);
@@ -65,14 +76,14 @@ const PiperTTSButton: React.FC<PiperTTSButtonProps> = ({ bookKey }) => {
   const controller = useMemo<ReaderController | null>(() => {
     if (!supported || !view || !bookDoc) return null;
     if (ttsEngine === 'piper') {
-      return voiceId ? getPiperReaderController(bookKey, view, bookDoc) : null;
+      return voiceId ? getPiperReaderController(bookKey, view, bookDoc, ttsRate) : null;
     }
-    if (ttsEngine === 'system') return getSystemReaderController(bookKey, view, bookDoc);
+    if (ttsEngine === 'system') return getSystemReaderController(bookKey, view, bookDoc, ttsRate);
     if (ttsEngine === 'melotts' && meloModel) {
-      return getMeloTTSReaderController(bookKey, view, bookDoc);
+      return getMeloTTSReaderController(bookKey, view, bookDoc, ttsRate, meloDevice);
     }
     return null;
-  }, [bookDoc, bookKey, meloModel, supported, ttsEngine, view, voiceId]);
+  }, [bookDoc, bookKey, meloDevice, meloModel, supported, ttsEngine, ttsRate, view, voiceId]);
 
   const snapshot = useSyncExternalStore<ReaderSnapshot>(
     controller?.subscribe ?? noopSubscribe,

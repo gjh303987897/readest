@@ -1,4 +1,4 @@
-import type { TTSEngine } from '@/types/settings';
+import type { MeloTTSDevice, TTSEngine } from '@/types/settings';
 import { resolveMeloTTSModel } from './meloTTSModels';
 
 export interface TTSEngineOption {
@@ -12,8 +12,18 @@ const TTS_ENGINE_OPTIONS: readonly TTSEngineOption[] = [
   { value: 'melotts', label: 'MeloTTS' },
 ];
 
+const TTS_RATE_OPTIONS = [0.8, 0.9, 1, 1.1, 1.2, 1.5, 2] as const;
+
 export const getTTSEngineOptions = (): TTSEngineOption[] =>
   TTS_ENGINE_OPTIONS.map((option) => ({ ...option }));
+
+export const getTTSRateOptions = (): number[] => [...TTS_RATE_OPTIONS];
+
+export const normalizeTTSRate = (rate: number | undefined): number =>
+  TTS_RATE_OPTIONS.some((option) => option === rate) ? rate! : 1;
+
+export const normalizeMeloTTSDevice = (device: string | undefined): MeloTTSDevice =>
+  device === 'gpu' ? 'gpu' : 'cpu';
 
 export const getPrimaryLanguageCode = (language: string | string[] | undefined): string | null => {
   const primaryLanguage = Array.isArray(language) ? language[0] : language;

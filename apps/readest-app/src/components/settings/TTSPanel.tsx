@@ -1,12 +1,20 @@
 import clsx from 'clsx';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ChevronDown, Download, LoaderCircle, Trash2 } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  CircuitBoard,
+  Cpu,
+  Download,
+  LoaderCircle,
+  Trash2,
+} from 'lucide-react';
 
 import { useTranslation } from '@/hooks/useTranslation';
 import { useEnv } from '@/context/EnvContext';
 import { saveSysSettings } from '@/helpers/settings';
 import { useSettingsStore } from '@/store/settingsStore';
-import type { TTSEngine } from '@/types/settings';
+import type { MeloTTSDevice, TTSEngine } from '@/types/settings';
 import Dropdown from '@/components/Dropdown';
 import Menu from '@/components/Menu';
 import MenuItem from '@/components/MenuItem';
@@ -24,7 +32,13 @@ import {
   removeMeloTTSModel,
   type MeloTTSModelCode,
 } from '@/services/tts/meloTTSModels';
-import { getTTSEngineOptions, normalizeTTSEngine } from '@/services/tts/ttsEngine';
+import {
+  getTTSEngineOptions,
+  getTTSRateOptions,
+  normalizeMeloTTSDevice,
+  normalizeTTSEngine,
+  normalizeTTSRate,
+} from '@/services/tts/ttsEngine';
 import type { SettingsPanelPanelProp } from './SettingsDialog';
 import { BoxedList, SettingsRow, Tips } from './primitives';
 
@@ -48,26 +62,26 @@ type LocalPackOption =
       description: string;
     };
 
-interface TTSEngineMenuProps {
-  options: { value: TTSEngine; label: string }[];
-  value: TTSEngine;
-  onChange: (value: TTSEngine) => void;
+interface TTSChoiceMenuProps<T extends string | number> {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
   setIsDropdownOpen?: (open: boolean) => void;
 }
 
-const TTSEngineMenu: React.FC<TTSEngineMenuProps> = ({
+const TTSChoiceMenu = <T extends string | number>({
   options,
   value,
   onChange,
   setIsDropdownOpen,
-}) => (
+}: TTSChoiceMenuProps<T>) => (
   <Menu
     className='dropdown-content bgcolor-base-200 no-triangle z-20 mt-2 w-44 max-w-[calc(100vw-2rem)] overflow-x-hidden rounded-xl border border-base-300/60 p-1.5 shadow-xl'
     onCancel={() => setIsDropdownOpen?.(false)}
   >
     {options.map((option) => (
       <MenuItem
-        key={option.value}
+        key={String(option.value)}
         label={option.label}
         toggled={option.value === value}
         transient
@@ -87,6 +101,8 @@ const TTSPanel: React.FC<SettingsPanelPanelProp> = () => {
   const settings = useSettingsStore((state) => state.settings);
   const storedTTSEngine = settings.ttsEngine as string | undefined;
   const ttsEngine = normalizeTTSEngine(storedTTSEngine);
+  const ttsRate = normalizeTTSRate(settings.ttsRate);
+  const meloDevice = normalizeMeloTTSDevice(settings.ttsMeloDevice);
   const voices = useMemo(() => getPiperVoiceCatalog(), []);
   const models = useMemo(() => getMeloTTSModelCatalog(), []);
   const engineOptions = useMemo(
@@ -95,6 +111,10 @@ const TTSPanel: React.FC<SettingsPanelPanelProp> = () => {
   );
   const selectedEngine =
     engineOptions.find(({ value }) => value === ttsEngine) ?? engineOptions[0]!;
+  const rateOptions = useMemo(
+    () => getTTSRateOptions().map((rate) => ({ value: rate, label: `${rate}x` })),
+    [],
+  );
   const packs = useMemo<LocalPackOption[]>(() => {
     if (ttsEngine === 'piper') {
       return voices.map((voice) => ({
@@ -154,6 +174,14 @@ const TTSPanel: React.FC<SettingsPanelPanelProp> = () => {
 
   const handleEngineChange = (engine: TTSEngine) => {
     void saveSysSettings(envConfig, 'ttsEngine', engine);
+  };
+
+  const handleRateChange = (rate: number) => {
+    void saveSysSettings(envConfig, 'ttsRate', rate);
+  };
+
+  const handleDeviceChange = (device: MeloTTSDevice) => {
+    void saveSysSettings(envConfig, 'ttsMeloDevice', device);
   };
 
   const engineDescription =
@@ -223,13 +251,70 @@ const TTSPanel: React.FC<SettingsPanelPanelProp> = () => {
               </>
             }
           >
-            <TTSEngineMenu
+            <TTSChoiceMenu
               options={engineOptions}
               value={ttsEngine}
               onChange={handleEngineChange}
             />
           </Dropdown>
         </SettingsRow>
+        <SettingsRow label={_('Reading speed')}>
+          <Dropdown
+            label={_('Reading speed')}
+            showTooltip={false}
+            containerClassName='w-24 max-w-[52%] min-w-0 justify-end [&>div]:max-w-full [&>div]:min-w-0'
+            className='dropdown-end'
+            buttonClassName='settings-content flex h-9 min-h-9 w-full max-w-full min-w-0 items-center justify-end gap-1 overflow-hidden rounded-md px-2 font-normal hover:bg-base-200/70 focus-visible:outline-none'
+            toggleButton={
+              <>
+                <span className='min-w-0 truncate'>{ttsRate}x</span>
+                <ChevronDown className='text-base-content/55 h-4 w-4 shrink-0' aria-hidden='true' />
+              </>
+            }
+          >
+            <TTSChoiceMenu options={rateOptions} value={ttsRate} onChange={handleRateChange} />
+          </Dropdown>
+        </SettingsRow>
+        {ttsEngine === 'melotts' && (
+          <SettingsRow
+            label={_('Inference device')}
+            description={_('GPU inference requires a compatible CUDA or MPS PyTorch runtime.')}
+          >
+            <div
+              role='radiogroup'
+              aria-label={_('Inference device')}
+              className='bg-base-200 eink-bordered inline-flex items-center rounded-lg p-0.5'
+            >
+              {[
+                { value: 'cpu' as const, label: 'CPU', Icon: Cpu },
+                { value: 'gpu' as const, label: 'GPU', Icon: CircuitBoard },
+              ].map(({ value, label, Icon }) => {
+                const active = meloDevice === value;
+                return (
+                  <button
+                    key={value}
+                    type='button'
+                    role='radio'
+                    aria-checked={active}
+                    aria-label={_(label)}
+                    title={_(label)}
+                    onClick={() => handleDeviceChange(value)}
+                    className={clsx(
+                      'flex h-9 min-w-[4.25rem] items-center justify-center gap-1.5 rounded-md px-2.5 text-sm font-medium transition-colors',
+                      'focus-visible:ring-base-content/15 focus-visible:outline-none focus-visible:ring-2',
+                      active
+                        ? 'bg-base-100 text-base-content eink-inverted shadow-sm'
+                        : 'text-base-content/60 hover:text-base-content',
+                    )}
+                  >
+                    <Icon className='h-4 w-4' aria-hidden='true' />
+                    {_(label)}
+                  </button>
+                );
+              })}
+            </div>
+          </SettingsRow>
+        )}
       </BoxedList>
 
       <BoxedList

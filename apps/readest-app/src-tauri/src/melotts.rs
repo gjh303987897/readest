@@ -24,6 +24,8 @@ struct RuntimeRequest<'a> {
     language_code: &'a str,
     text: &'a str,
     model_dir: &'a Path,
+    speed: f32,
+    device: &'a str,
 }
 
 struct MeloProcess {
@@ -51,6 +53,22 @@ fn parse_runtime_response(line: &str) -> Result<String, String> {
         .error
         .filter(|error| !error.is_empty())
         .unwrap_or_else(|| "MeloTTS synthesis failed".to_string()))
+}
+
+fn validate_speed(speed: f32) -> Result<f32, String> {
+    if speed.is_finite() && (0.5..=2.0).contains(&speed) {
+        Ok(speed)
+    } else {
+        Err("MeloTTS speed must be between 0.5 and 2.0".to_string())
+    }
+}
+
+fn validate_device(device: &str) -> Result<&str, String> {
+    if matches!(device, "cpu" | "gpu") {
+        Ok(device)
+    } else {
+        Err("MeloTTS device must be cpu or gpu".to_string())
+    }
 }
 
 fn runtime_script_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -219,6 +237,8 @@ impl MeloTtsState {
         app: &AppHandle,
         language_code: &str,
         text: &str,
+        speed: f32,
+        device: &str,
     ) -> Result<String, String> {
         if !cfg!(desktop) {
             return Err(
@@ -235,6 +255,8 @@ impl MeloTtsState {
         if text.chars().count() > 2_000 {
             return Err("MeloTTS text segment is too long".to_string());
         }
+        let speed = validate_speed(speed)?;
+        let device = validate_device(device)?;
 
         let model_dir = app
             .path()
@@ -258,6 +280,8 @@ impl MeloTtsState {
             language_code,
             text,
             model_dir: &model_dir,
+            speed,
+            device,
         };
         let mut process = self
             .process
@@ -275,6 +299,15 @@ impl MeloTtsState {
         }
         result
     }
+
+    fn release(&self) -> Result<(), String> {
+        let mut process = self
+            .process
+            .lock()
+            .map_err(|_| "MeloTTS runtime state is unavailable".to_string())?;
+        process.take();
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -283,16 +316,29 @@ pub async fn melotts_synthesize(
     state: State<'_, MeloTtsState>,
     language_code: String,
     text: String,
+    speed: Option<f32>,
+    device: Option<String>,
 ) -> Result<String, String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.synthesize(&app, &language_code, &text))
+    let device = device.unwrap_or_else(|| "cpu".to_string());
+    tauri::async_runtime::spawn_blocking(move || {
+        state.synthesize(&app, &language_code, &text, speed.unwrap_or(1.0), &device)
+    })
+    .await
+    .map_err(|error| format!("MeloTTS worker failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn melotts_release(state: State<'_, MeloTtsState>) -> Result<(), String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.release())
         .await
         .map_err(|error| format!("MeloTTS worker failed: {error}"))?
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_runtime_response;
+    use super::{parse_runtime_response, validate_device, validate_speed};
 
     #[test]
     fn parses_successful_audio_response() {
@@ -306,5 +352,19 @@ mod tests {
         let error = parse_runtime_response(r#"{"ok":false,"error":"MeloTTS package missing"}"#)
             .expect_err("runtime error should be returned");
         assert_eq!(error, "MeloTTS package missing");
+    }
+
+    #[test]
+    fn validates_synthesis_speed() {
+        assert_eq!(validate_speed(1.1), Ok(1.1));
+        assert!(validate_speed(0.4).is_err());
+        assert!(validate_speed(f32::NAN).is_err());
+    }
+
+    #[test]
+    fn validates_inference_device() {
+        assert_eq!(validate_device("cpu"), Ok("cpu"));
+        assert_eq!(validate_device("gpu"), Ok("gpu"));
+        assert!(validate_device("cuda").is_err());
     }
 }

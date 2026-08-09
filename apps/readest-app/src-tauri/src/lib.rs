@@ -244,6 +244,7 @@ pub fn run() {
             download_file,
             upload_file,
             melotts::melotts_synthesize,
+            melotts::melotts_release,
             get_executable_dir,
             allow_paths_in_scopes,
             dir_scanner::read_dir,

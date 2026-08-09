@@ -43,6 +43,8 @@ export const DEFAULT_SYSTEM_SETTINGS: Partial<SystemSettings> = {
   autoScreenBrightness: true,
   swipeBrightnessGesture: true,
   ttsEngine: 'piper',
+  ttsRate: 1,
+  ttsMeloDevice: 'cpu',
   hardwarePageTurner: {
     enabled: false,
     bindings: {

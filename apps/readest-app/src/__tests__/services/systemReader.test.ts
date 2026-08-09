@@ -11,7 +11,7 @@ const speechSynthesisMock = {
   paused: false,
   speaking: false,
   pending: false,
-  speak: vi.fn((utterance: { text: string; onend: (() => void) | null }) => {
+  speak: vi.fn((utterance: { text: string; rate: number; onend: (() => void) | null }) => {
     speechSynthesisMock.speaking = true;
     utterance.onend?.();
     speechSynthesisMock.speaking = false;
@@ -28,6 +28,7 @@ const speechSynthesis = speechSynthesisMock as unknown as SpeechSynthesis;
 
 class MockSpeechSynthesisUtterance {
   lang = '';
+  rate = 1;
   onend: (() => void) | null = null;
   onerror: ((event: { error: string }) => void) | null = null;
 
@@ -79,14 +80,20 @@ describe('System TTS reader', () => {
   it('reads the selected text with the system speech synthesis API', async () => {
     Object.assign(window, { speechSynthesis });
     Object.assign(globalThis, { SpeechSynthesisUtterance: MockSpeechSynthesisUtterance });
-    const controller = getSystemReaderController('book', makeView(true), {
-      metadata: { language: 'zh-CN' },
-    } as never);
+    const controller = getSystemReaderController(
+      'book',
+      makeView(true),
+      {
+        metadata: { language: 'zh-CN' },
+      } as never,
+      1.1,
+    );
 
     await controller.toggle();
 
     expect(speechSynthesisMock.speak).toHaveBeenCalledTimes(1);
     expect(speechSynthesisMock.speak.mock.calls[0]?.[0].text).toBe('Hello from system TTS');
+    expect(speechSynthesisMock.speak.mock.calls[0]?.[0].rate).toBe(1.1);
   });
 
   it('requires a text selection before starting', async () => {

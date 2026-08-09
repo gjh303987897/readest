@@ -1,8 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import type { BookDoc } from '@/libs/document';
+import type { MeloTTSDevice } from '@/types/settings';
 import type { FoliateTTS, FoliateView } from '@/types/view';
 import { resolveMeloTTSModel, type MeloTTSModelCode } from './meloTTSModels';
+import { normalizeMeloTTSDevice, normalizeTTSRate } from './ttsEngine';
 import {
   getNextSectionIndex,
   getSelectedSpeechSegments,
@@ -13,6 +15,12 @@ import {
 } from './ttsReaderUtils';
 
 export type MeloTTSPlaybackSnapshot = TTSPlaybackSnapshot;
+type SpeechSegment = ReturnType<typeof ssmlToSegments>[number];
+
+interface PreparedAudio {
+  audio: HTMLAudioElement;
+  objectUrl: string;
+}
 
 const INITIAL_SNAPSHOT: MeloTTSPlaybackSnapshot = {
   status: 'idle',
@@ -23,6 +31,17 @@ const INITIAL_SNAPSHOT: MeloTTSPlaybackSnapshot = {
 
 const controllers = new Map<string, MeloTTSReaderController>();
 let activeController: MeloTTSReaderController | null = null;
+let pendingRuntimeRelease: Promise<void> = Promise.resolve();
+let runtimeGeneration = 0;
+
+const releaseMeloRuntime = (): void => {
+  runtimeGeneration += 1;
+  pendingRuntimeRelease = pendingRuntimeRelease
+    .then(() => invoke<void>('melotts_release'))
+    .catch((error: unknown) => {
+      console.warn('Failed to release MeloTTS runtime:', error);
+    });
+};
 
 const WARMUP_TEXT: Record<MeloTTSModelCode, string> = {
   EN: 'Ready.',
@@ -52,11 +71,14 @@ class MeloTTSReaderController {
   private resolvePlayback: (() => void) | null = null;
   private preloadPromise: Promise<void> | null = null;
   private preloadedModel: MeloTTSModelCode | null = null;
+  private preparedAudio = new Set<PreparedAudio>();
 
   constructor(
     private readonly bookKey: string,
     private readonly view: FoliateView,
     private readonly language: string | string[] | undefined,
+    private readonly rate: number,
+    private readonly device: MeloTTSDevice,
   ) {}
 
   getSnapshot = (): MeloTTSPlaybackSnapshot => this.snapshot;
@@ -66,8 +88,18 @@ class MeloTTSReaderController {
     return () => this.listeners.delete(listener);
   };
 
-  isFor(view: FoliateView, language: string | string[] | undefined): boolean {
-    return this.view === view && this.language === language;
+  isFor(
+    view: FoliateView,
+    language: string | string[] | undefined,
+    rate: number,
+    device: MeloTTSDevice,
+  ): boolean {
+    return (
+      this.view === view &&
+      this.language === language &&
+      this.rate === rate &&
+      this.device === device
+    );
   }
 
   async preload(): Promise<void> {
@@ -75,17 +107,27 @@ class MeloTTSReaderController {
     if (!model || this.preloadedModel === model.code) return;
     if (this.preloadPromise) return this.preloadPromise;
 
-    this.preloadPromise = (async () => {
+    const task = (async () => {
+      let releaseTask = pendingRuntimeRelease;
+      await releaseTask;
+      while (releaseTask !== pendingRuntimeRelease) {
+        releaseTask = pendingRuntimeRelease;
+        await releaseTask;
+      }
+      const generation = runtimeGeneration;
       await invoke<string>('melotts_synthesize', {
+        device: this.device,
         languageCode: model.code,
         text: WARMUP_TEXT[model.code],
+        speed: this.rate,
       });
-      this.preloadedModel = model.code;
+      if (generation === runtimeGeneration) this.preloadedModel = model.code;
     })();
+    this.preloadPromise = task;
     try {
-      await this.preloadPromise;
+      await task;
     } finally {
-      this.preloadPromise = null;
+      if (this.preloadPromise === task) this.preloadPromise = null;
     }
   }
 
@@ -102,16 +144,15 @@ class MeloTTSReaderController {
   }
 
   stop(): void {
+    const shouldReleaseRuntime = this.preloadedModel !== null || this.preloadPromise !== null;
     this.operation += 1;
     this.resolvePlayback?.();
     this.resolvePlayback = null;
-    this.audio?.pause();
-    if (this.audio) {
-      this.audio.removeAttribute('src');
-      this.audio.load();
-    }
-    this.revokeObjectUrl();
+    this.releaseAudioResources();
     this.tts = null;
+    this.preloadedModel = null;
+    this.preloadPromise = null;
+    if (shouldReleaseRuntime) releaseMeloRuntime();
     if (activeController === this) activeController = null;
     this.setSnapshot({ status: 'idle', progress: 0, error: null });
   }
@@ -164,6 +205,12 @@ class MeloTTSReaderController {
       await this.playSegment(model.code, ssml, operation);
     } catch (error) {
       if (operation !== this.operation) return;
+      this.operation += 1;
+      this.releaseAudioResources();
+      this.tts = null;
+      this.preloadedModel = null;
+      releaseMeloRuntime();
+      if (activeController === this) activeController = null;
       this.setSnapshot({
         status: 'error',
         error: error instanceof Error ? error.message : String(error),
@@ -178,19 +225,27 @@ class MeloTTSReaderController {
     operation: number,
   ): Promise<void> {
     const segments = ssmlToSegments(ssml);
-    for (const segment of segments) {
+    let current = this.takeNextSegment(segments);
+    let synthesis = current ? this.prepareAudio(languageCode, current.text, operation) : null;
+
+    while (current && synthesis) {
+      const prepared = await synthesis;
+      if (operation !== this.operation || !prepared) return;
+
+      if (current.markName) this.tts?.setMark(current.markName);
+      const next = this.takeNextSegment(segments);
+      const nextSynthesis = next ? this.prepareAudio(languageCode, next.text, operation) : null;
+      // A stopped playback may no longer await the lookahead request.
+      void nextSynthesis?.catch(() => undefined);
+
+      await this.playPreparedAudio(prepared, operation);
       if (operation !== this.operation) return;
-      if (segment.markName) this.tts?.setMark(segment.markName);
-      await this.playText(languageCode, segment.text, operation);
+
+      current = next;
+      synthesis = nextSynthesis;
     }
 
     if (operation !== this.operation || !this.tts) return;
-    const next = this.tts.next();
-    if (next) {
-      await this.playSegment(languageCode, next, operation);
-      return;
-    }
-
     const nextSectionIndex = getNextSectionIndex(this.view);
     if (nextSectionIndex == null) {
       this.stop();
@@ -209,18 +264,46 @@ class MeloTTSReaderController {
     await this.playSegment(languageCode, first, operation);
   }
 
-  private async playText(
+  private takeNextSegment(segments: SpeechSegment[]): SpeechSegment | null {
+    while (segments.length === 0) {
+      const next = this.tts?.next();
+      if (!next) return null;
+      segments.push(...ssmlToSegments(next));
+    }
+    return segments.shift() ?? null;
+  }
+
+  private async prepareAudio(
     languageCode: MeloTTSModelCode,
     text: string,
     operation: number,
-  ): Promise<void> {
-    const waveBase64 = await invoke<string>('melotts_synthesize', { languageCode, text });
-    if (operation !== this.operation) return;
+  ): Promise<PreparedAudio | null> {
+    const waveBase64 = await invoke<string>('melotts_synthesize', {
+      device: this.device,
+      languageCode,
+      text,
+      speed: this.rate,
+    });
+    if (operation !== this.operation) return null;
 
-    const audio = this.getAudio();
-    this.revokeObjectUrl();
-    this.objectUrl = URL.createObjectURL(decodeWave(waveBase64));
-    audio.src = this.objectUrl;
+    if (typeof Audio === 'undefined') throw new Error('Audio playback is unavailable');
+    const audio = new Audio();
+    audio.preload = 'auto';
+    const objectUrl = URL.createObjectURL(decodeWave(waveBase64));
+    audio.src = objectUrl;
+    audio.load();
+    const prepared = { audio, objectUrl };
+    this.preparedAudio.add(prepared);
+    return prepared;
+  }
+
+  private async playPreparedAudio(prepared: PreparedAudio, operation: number): Promise<void> {
+    if (operation !== this.operation) return;
+    this.releaseCurrentAudio();
+    this.preparedAudio.delete(prepared);
+    const { audio, objectUrl } = prepared;
+    this.audio = audio;
+    this.objectUrl = objectUrl;
     this.setSnapshot({ status: 'playing', progress: 1 });
 
     await new Promise<void>((resolve, reject) => {
@@ -248,13 +331,25 @@ class MeloTTSReaderController {
     });
   }
 
-  private getAudio(): HTMLAudioElement {
-    if (!this.audio) {
-      if (typeof Audio === 'undefined') throw new Error('Audio playback is unavailable');
-      this.audio = new Audio();
-      this.audio.preload = 'auto';
+  private releaseAudioResources(): void {
+    this.releaseCurrentAudio();
+    for (const prepared of this.preparedAudio) {
+      prepared.audio.pause();
+      prepared.audio.removeAttribute('src');
+      prepared.audio.load();
+      URL.revokeObjectURL(prepared.objectUrl);
     }
-    return this.audio;
+    this.preparedAudio.clear();
+  }
+
+  private releaseCurrentAudio(): void {
+    this.audio?.pause();
+    if (this.audio) {
+      this.audio.removeAttribute('src');
+      this.audio.load();
+      this.audio = null;
+    }
+    this.revokeObjectUrl();
   }
 
   private revokeObjectUrl(): void {
@@ -273,11 +368,23 @@ export const getMeloTTSReaderController = (
   bookKey: string,
   view: FoliateView,
   bookDoc: BookDoc,
+  rate = 1,
+  device: MeloTTSDevice = 'cpu',
 ): MeloTTSReaderController => {
+  const normalizedRate = normalizeTTSRate(rate);
+  const normalizedDevice = normalizeMeloTTSDevice(device);
   const existing = controllers.get(bookKey);
-  if (existing?.isFor(view, bookDoc.metadata.language)) return existing;
+  if (existing?.isFor(view, bookDoc.metadata.language, normalizedRate, normalizedDevice)) {
+    return existing;
+  }
   existing?.dispose();
-  const controller = new MeloTTSReaderController(bookKey, view, bookDoc.metadata.language);
+  const controller = new MeloTTSReaderController(
+    bookKey,
+    view,
+    bookDoc.metadata.language,
+    normalizedRate,
+    normalizedDevice,
+  );
   controllers.set(bookKey, controller);
   return controller;
 };

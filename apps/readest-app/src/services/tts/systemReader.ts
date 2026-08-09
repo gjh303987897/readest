@@ -1,5 +1,6 @@
 import type { BookDoc } from '@/libs/document';
 import type { FoliateTTS, FoliateView } from '@/types/view';
+import { normalizeTTSRate } from './ttsEngine';
 import {
   getNextSectionIndex,
   getSelectedSpeechSegments,
@@ -45,6 +46,7 @@ class SystemReaderController {
     private readonly bookKey: string,
     private readonly view: FoliateView,
     private readonly language: string | string[] | undefined,
+    private readonly rate: number,
   ) {}
 
   getSnapshot = (): SystemPlaybackSnapshot => this.snapshot;
@@ -54,8 +56,8 @@ class SystemReaderController {
     return () => this.listeners.delete(listener);
   };
 
-  isFor(view: FoliateView, language: string | string[] | undefined): boolean {
-    return this.view === view && this.language === language;
+  isFor(view: FoliateView, language: string | string[] | undefined, rate: number): boolean {
+    return this.view === view && this.language === language && this.rate === rate;
   }
 
   async preload(): Promise<void> {
@@ -184,6 +186,7 @@ class SystemReaderController {
     const utterance = new SpeechSynthesisUtteranceConstructor(text);
     const language = getSpeechLanguage(this.language);
     if (language) utterance.lang = language;
+    utterance.rate = this.rate;
     this.utterance = utterance;
     this.setSnapshot({ status: 'playing', progress: 1 });
 
@@ -225,11 +228,18 @@ export const getSystemReaderController = (
   bookKey: string,
   view: FoliateView,
   bookDoc: BookDoc,
+  rate = 1,
 ): SystemReaderController => {
+  const normalizedRate = normalizeTTSRate(rate);
   const existing = controllers.get(bookKey);
-  if (existing?.isFor(view, bookDoc.metadata.language)) return existing;
+  if (existing?.isFor(view, bookDoc.metadata.language, normalizedRate)) return existing;
   existing?.dispose();
-  const controller = new SystemReaderController(bookKey, view, bookDoc.metadata.language);
+  const controller = new SystemReaderController(
+    bookKey,
+    view,
+    bookDoc.metadata.language,
+    normalizedRate,
+  );
   controllers.set(bookKey, controller);
   return controller;
 };
