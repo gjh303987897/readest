@@ -209,9 +209,25 @@ jobs:
           retention-days: 14
 
   android:
-    name: Android universal debug APK
+    name: Android ${{ matrix.abi }} release APK
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            target: aarch64
+            rust_target: aarch64-linux-android
+          - abi: armeabi-v7a
+            target: armv7
+            rust_target: armv7-linux-androideabi
+          - abi: x86
+            target: i686
+            rust_target: i686-linux-android
+          - abi: x86_64
+            target: x86_64
+            rust_target: x86_64-linux-android
 
     steps:
       - name: Check out repository
@@ -249,29 +265,35 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: ${{ matrix.rust_target }}
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: apps/readest-app/src-tauri -> target
-          key: android
+          key: android-release-${{ matrix.target }}
 
-      - name: Build installable debug APK
+      - name: Build optimized release APK
         working-directory: apps/readest-app
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
+          CARGO_PROFILE_RELEASE_DEBUG: "0"
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_STRIP: symbols
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
           NODE_OPTIONS: --max-old-space-size=8192
         run: |
           rm -rf src-tauri/gen/android
           pnpm tauri android init --ci
-          pnpm tauri android build --debug --apk --ci
+          pnpm build
+          find out -type f -name '*.map' -delete
+          pnpm tauri android build --target "${{ matrix.target }}" --apk --ci --config '{"build":{"beforeBuildCommand":""}}'
 
-      - name: Upload Android APKs
+      - name: Upload Android release APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: readest-android-debug-${{ github.sha }}
+          name: readest-android-${{ matrix.abi }}-release-${{ github.sha }}
           path: apps/readest-app/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14
