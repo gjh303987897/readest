@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { Book } from '@/types/book';
 import type { EnvConfigType } from '@/services/environment';
 import { isTauriAppPlatform } from '@/services/environment';
+import { filterAccessibleBooks } from '@/services/privacyService';
+import { usePrivacyStore } from '@/store/privacyStore';
 
 interface LibraryState {
   library: Book[];
@@ -30,7 +32,14 @@ interface LibraryState {
 const buildHashIndex = (books: Book[]) =>
   new Map(books.map((book, index) => [book.hash, index] as const));
 
-const visibleBooks = (books: Book[]) => books.filter((book) => !book.deletedAt);
+const visibleBooks = (books: Book[]) => {
+  const { hiddenBookHashes, isUnlocked } = usePrivacyStore.getState();
+  return filterAccessibleBooks(
+    books.filter((book) => !book.deletedAt),
+    hiddenBookHashes,
+    isUnlocked,
+  );
+};
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   library: [],
@@ -106,3 +115,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!options?.skipSave) await appService.saveLibraryBooks(updated);
   },
 }));
+
+usePrivacyStore.subscribe((state, previous) => {
+  if (
+    state.isUnlocked === previous.isUnlocked &&
+    state.hiddenBookHashes === previous.hiddenBookHashes
+  ) {
+    return;
+  }
+  useLibraryStore.setState((libraryState) => ({
+    visibleLibrary: visibleBooks(libraryState.library),
+  }));
+});

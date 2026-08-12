@@ -10,6 +10,9 @@ import { DropdownProvider } from '@/context/DropdownContext';
 import { SyncProvider } from '@/context/SyncContext';
 import { useEnv } from '@/context/EnvContext';
 import { initSystemThemeListener, loadDataTheme } from '@/store/themeStore';
+import { initializePrivacyStore, usePrivacyStore } from '@/store/privacyStore';
+import { useBookDataStore } from '@/store/bookDataStore';
+import { useSidebarStore } from '@/store/sidebarStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useSafeAreaInsets } from '@/hooks/useSafeAreaInsets';
 import { useSettingsSync } from '@/hooks/useSettingsSync';
@@ -27,6 +30,31 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
 
   useSafeAreaInsets();
   useSettingsSync();
+
+  useEffect(() => {
+    const cleanupPrivacyStore = initializePrivacyStore();
+    const unsubscribe = usePrivacyStore.subscribe((state, previous) => {
+      if (state.isUnlocked || !previous.isUnlocked) return;
+      const hiddenHashes = new Set([...previous.hiddenBookHashes, ...state.hiddenBookHashes]);
+      hiddenHashes.forEach((hash) => useBookDataStore.getState().clearBookData(hash));
+      useSidebarStore.setState((sidebarState) => ({
+        searchNavStates: Object.fromEntries(
+          Object.entries(sidebarState.searchNavStates).filter(
+            ([bookKey]) => !hiddenHashes.has(bookKey.split('-')[0]!),
+          ),
+        ),
+        searchStatuses: Object.fromEntries(
+          Object.entries(sidebarState.searchStatuses).filter(
+            ([bookKey]) => !hiddenHashes.has(bookKey.split('-')[0]!),
+          ),
+        ),
+      }));
+    });
+    return () => {
+      unsubscribe();
+      cleanupPrivacyStore();
+    };
+  }, []);
 
   useEffect(() => {
     const handleLanguageChanged = (language: string) => {

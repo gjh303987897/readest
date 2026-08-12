@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEnv } from '@/context/EnvContext';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useBookDataStore } from '@/store/bookDataStore';
+import { useLibraryStore } from '@/store/libraryStore';
+import { usePrivacyStore } from '@/store/privacyStore';
 import { useReaderStore } from '@/store/readerStore';
 import { useSidebarStore } from '@/store/sidebarStore';
 import { useGamepad } from '@/hooks/useGamepad';
@@ -40,6 +42,7 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
   const { envConfig, appService } = useEnv();
   const { bookKeys, dismissBook, getNextBookKey } = useBooksManager();
   const { sideBarBookKey, setSideBarBookKey } = useSidebarStore();
+  const clearSearch = useSidebarStore((state) => state.clearSearch);
   const { saveSettings } = useSettingsStore();
   const { getConfig, getBookData, saveConfig } = useBookDataStore();
   const { getView, setBookKeys, getViewSettings } = useReaderStore();
@@ -98,11 +101,13 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
     window.addEventListener('beforeunload', handleCloseBooks);
     eventDispatcher.on('beforereload', handleCloseBooks);
     eventDispatcher.on('close-reader', handleCloseReaderToLibrary);
+    eventDispatcher.onSync('privacy-lock-reader', handlePrivacyLock);
     eventDispatcher.on('quit-app', handleCloseBooks);
     return () => {
       window.removeEventListener('beforeunload', handleCloseBooks);
       eventDispatcher.off('beforereload', handleCloseBooks);
       eventDispatcher.off('close-reader', handleCloseReaderToLibrary);
+      eventDispatcher.offSync('privacy-lock-reader', handlePrivacyLock);
       eventDispatcher.off('quit-app', handleCloseBooks);
       unlistenOnCloseWindow?.then((fn) => fn());
     };
@@ -144,6 +149,45 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
 
   const handleCloseReaderToLibrary = () => {
     return handleCloseBooks();
+  };
+
+  const handlePrivacyLock = (event: CustomEvent) => {
+    const hiddenBookHashes =
+      (event.detail as { hiddenBookHashes?: string[] } | undefined)?.hiddenBookHashes ??
+      usePrivacyStore.getState().hiddenBookHashes;
+    const hasPrivateBookOpen = bookKeys.some((key) =>
+      hiddenBookHashes.includes(key.split('-')[0]!),
+    );
+    if (!hasPrivateBookOpen) return false;
+    const settings = useSettingsStore.getState().settings;
+    const library = useLibraryStore.getState().library;
+    const configs = bookKeys.flatMap((bookKey) => {
+      const bookData = getBookData(bookKey);
+      const viewState = getViewState(bookKey);
+      return viewState?.isPrimary && bookData?.book && bookData.config
+        ? [{ book: bookData.book, config: bookData.config }]
+        : [];
+    });
+    bookKeys.forEach((bookKey) => {
+      eventDispatcher.dispatch('sync-book-progress', { bookKey });
+      try {
+        getView(bookKey)?.close();
+        getView(bookKey)?.remove();
+      } catch {
+        console.info('Error closing private book', bookKey);
+      }
+      clearViewState(bookKey);
+      clearSearch(bookKey);
+      useBookDataStore.getState().clearBookData(bookKey);
+    });
+    setSideBarBookKey('');
+    if (appService) {
+      void Promise.all([
+        ...configs.map(({ book, config }) => appService.saveBookConfig(book, config, settings)),
+        appService.saveLibraryBooks(library),
+      ]).catch((error) => console.warn('Failed to save private reader state', error));
+    }
+    return false;
   };
 
   const handleCloseBooks = throttle(async () => {

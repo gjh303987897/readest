@@ -4,6 +4,13 @@ vi.mock('@/services/environment', () => ({
   isTauriAppPlatform: () => false,
 }));
 
+vi.mock('@/store/privacyStore', () => ({
+  usePrivacyStore: {
+    getState: () => ({ hiddenBookHashes: [], isUnlocked: false }),
+    subscribe: () => () => {},
+  },
+}));
+
 import { useLibraryStore } from '@/store/libraryStore';
 import type { Book } from '@/types/book';
 import type { EnvConfigType } from '@/services/environment';

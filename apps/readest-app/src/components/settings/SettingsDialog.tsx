@@ -4,6 +4,7 @@ import {
   LayoutGrid,
   MousePointer2,
   Palette,
+  ShieldCheck,
   RotateCcw,
   Settings2,
   Type,
@@ -21,8 +22,16 @@ import ThemePanel from './ThemePanel';
 import ControlPanel from './ControlPanel';
 import GeneralPanel from './GeneralPanel';
 import TTSPanel from './TTSPanel';
+import PrivacyPanel from './PrivacyPanel';
 
-export type SettingsPanelType = 'General' | 'Font' | 'Layout' | 'Theme' | 'Control' | 'TTS';
+export type SettingsPanelType =
+  | 'General'
+  | 'Font'
+  | 'Layout'
+  | 'Theme'
+  | 'Control'
+  | 'TTS'
+  | 'Privacy';
 
 export type SettingsPanelPanelProp = {
   bookKey: string;
@@ -45,6 +54,7 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
       { id: 'Theme' as const, label: _('Theme'), Icon: Palette },
       { id: 'Control' as const, label: _('Behavior'), Icon: MousePointer2 },
       { id: 'TTS' as const, label: _('TTS'), Icon: Volume2 },
+      { id: 'Privacy' as const, label: _('Privacy'), Icon: ShieldCheck },
     ],
     [_],
   );
@@ -84,7 +94,11 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
       useOverlayScroll
       header={
         <div className='flex w-full items-center gap-2'>
-          <div role='tablist' aria-label={_('Settings Panels')} className='flex flex-1 gap-1'>
+          <div
+            role='tablist'
+            aria-label={_('Settings Panels')}
+            className='flex min-w-0 flex-1 gap-1 overflow-x-auto'
+          >
             {tabs.map(({ id, label, Icon }) => (
               <button
                 key={id}
@@ -102,7 +116,7 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
               </button>
             ))}
           </div>
-          {activePanel !== 'TTS' && (
+          {activePanel !== 'TTS' && activePanel !== 'Privacy' && (
             <button
               type='button'
               className='btn btn-ghost btn-sm btn-square'
@@ -152,6 +166,9 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
         )}
         {activePanel === 'TTS' && (
           <TTSPanel onRegisterReset={(reset) => registerReset('TTS', reset)} bookKey='' />
+        )}
+        {activePanel === 'Privacy' && (
+          <PrivacyPanel onRegisterReset={(reset) => registerReset('Privacy', reset)} bookKey='' />
         )}
       </div>
     </Dialog>

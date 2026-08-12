@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useEnv } from '@/context/EnvContext';
 import { useLibraryStore } from '@/store/libraryStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { usePrivacyStore } from '@/store/privacyStore';
 
 export const useLibrary = () => {
   const { envConfig } = useEnv();
@@ -21,6 +22,7 @@ export const useLibrary = () => {
     isInitiating.current = true;
     const initLibrary = async () => {
       const appService = await envConfig.getAppService();
+      usePrivacyStore.getState().hydrate();
       const settings = await appService.loadSettings();
       setSettings(settings);
       setLibrary(await appService.loadLibraryBooks());

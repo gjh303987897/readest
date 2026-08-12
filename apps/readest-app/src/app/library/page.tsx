@@ -9,8 +9,11 @@ import {
   CloudUpload,
   Download,
   LoaderCircle,
+  Lock,
+  LockOpen,
   LogIn,
   LogOut,
+  MoreVertical,
   RefreshCw,
   Search,
   Settings,
@@ -40,6 +43,10 @@ import Spinner from '@/components/Spinner';
 import { Toast } from '@/components/Toast';
 import WindowButtons from '@/components/WindowButtons';
 import SettingsDialog from '@/components/settings/SettingsDialog';
+import Dropdown from '@/components/Dropdown';
+import MenuItem from '@/components/MenuItem';
+import PrivacyUnlockDialog from '@/components/PrivacyUnlockDialog';
+import { usePrivacyStore } from '@/store/privacyStore';
 import { useBooksSync } from './hooks/useBooksSync';
 import { useBookTransferActions } from './hooks/useBookTransferActions';
 
@@ -62,16 +69,22 @@ const LibraryPage = () => {
   const checkOpenWithBooks = useLibraryStore((state) => state.checkOpenWithBooks);
   const setCheckOpenWithBooks = useLibraryStore((state) => state.setCheckOpenWithBooks);
   const clearBookData = useBookDataStore((state) => state.clearBookData);
+  const { hasPin, isUnlocked, hiddenBookHashes, lock, hideBook, unhideBook } = usePrivacyStore();
   const { selectFiles } = useFileSelector(appService, _);
   const { pullLibrary, pushLibrary } = useBooksSync();
   const [query, setQuery] = useState('');
   const [importing, setImporting] = useState(false);
   const [busyBookHash, setBusyBookHash] = useState<string | null>(null);
+  const [isUnlockDialogOpen, setUnlockDialogOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const showWindowControls = !!appService?.hasWindowBar && !appService.hasTrafficLight;
 
   useTheme({ systemUIVisible: true, appThemeColor: 'base-100' });
   useTransferQueue(libraryLoaded);
+
+  useEffect(() => {
+    if (!isUnlocked) setQuery('');
+  }, [isUnlocked]);
 
   const { handleBookUpload, handleBookDownload } = useBookTransferActions(
     envConfig,
@@ -216,12 +229,21 @@ const LibraryPage = () => {
         uploadedAt: user ? null : book.uploadedAt,
       };
       await updateBook(envConfig, deletedBook);
+      if (hiddenBookHashes.includes(book.hash)) unhideBook(book.hash);
       clearBookData(book.hash);
       await pushLibrary();
     } catch {
       notifyError(_('Failed to delete book'));
     } finally {
       setBusyBookHash(null);
+    }
+  };
+
+  const handlePrivacyToggle = (book: Book) => {
+    if (hiddenBookHashes.includes(book.hash)) {
+      unhideBook(book.hash);
+    } else {
+      hideBook(book.hash);
     }
   };
 
@@ -251,6 +273,17 @@ const LibraryPage = () => {
         </label>
 
         <div className='exclude-title-bar-mousedown flex shrink-0 items-center gap-2'>
+          {hasPin && (
+            <button
+              type='button'
+              className='btn btn-ghost btn-square h-9 min-h-9 w-9'
+              title={isUnlocked ? _('Lock Privacy Mode') : _('Unlock Privacy Mode')}
+              aria-label={isUnlocked ? _('Lock Privacy Mode') : _('Unlock Privacy Mode')}
+              onClick={() => (isUnlocked ? lock() : setUnlockDialogOpen(true))}
+            >
+              {isUnlocked ? <LockOpen className='h-4 w-4' /> : <Lock className='h-4 w-4' />}
+            </button>
+          )}
           {user && (
             <button
               type='button'
@@ -331,6 +364,7 @@ const LibraryPage = () => {
           {visibleBooks.map((book) => {
             const percent = progressPercent(book);
             const busy = busyBookHash === book.hash;
+            const isPrivate = hiddenBookHashes.includes(book.hash);
             return (
               <article key={book.hash} className='group min-w-0'>
                 <button
@@ -341,6 +375,15 @@ const LibraryPage = () => {
                   disabled={busy}
                 >
                   <BookCover book={book} coverFit='crop' />
+                  {isPrivate && (
+                    <span
+                      className='bg-base-100/90 eink-bordered absolute end-2 top-2 flex h-7 w-7 items-center justify-center rounded-full'
+                      title={_('Hidden in Privacy Mode')}
+                      aria-hidden='true'
+                    >
+                      <Lock className='h-3.5 w-3.5' />
+                    </span>
+                  )}
                   {busy && (
                     <span className='bg-base-100/70 absolute inset-0 flex items-center justify-center'>
                       <LoaderCircle className='h-5 w-5 animate-spin' />
@@ -413,6 +456,26 @@ const LibraryPage = () => {
                       >
                         <Trash2 className='h-4 w-4' />
                       </button>
+                      {hasPin && isUnlocked && (
+                        <Dropdown
+                          label={_('Book Actions')}
+                          className='dropdown-end'
+                          buttonClassName='btn btn-ghost btn-square h-7 min-h-7 w-7'
+                          toggleButton={<MoreVertical className='h-4 w-4' />}
+                        >
+                          <ul className='menu dropdown-content bg-base-100 eink-bordered z-50 w-56 rounded-lg border p-2 shadow'>
+                            <MenuItem
+                              transient
+                              label={
+                                isPrivate
+                                  ? _('Remove from Privacy Mode')
+                                  : _('Hide in Privacy Mode')
+                              }
+                              onClick={() => handlePrivacyToggle(book)}
+                            />
+                          </ul>
+                        </Dropdown>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -422,6 +485,7 @@ const LibraryPage = () => {
         </section>
       )}
       {isSettingsDialogOpen && <SettingsDialog bookKey='' initialPanel='General' />}
+      <PrivacyUnlockDialog isOpen={isUnlockDialogOpen} onClose={() => setUnlockDialogOpen(false)} />
       <Toast />
     </main>
   );
