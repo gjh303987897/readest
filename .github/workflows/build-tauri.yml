@@ -358,9 +358,10 @@ jobs:
               --key-pass "file:$key_password_file" \
               --out "$signed_apk" \
               "$aligned_apk"
-            "$apksigner" verify --verbose --print-certs "$signed_apk"
-            "$apksigner" verify --print-certs "$signed_apk" | grep -qi \
-              'Signer #1 certificate SHA-256 digest: b170604e596e8cf66cfeb985cdfaa14796b1bd5dcf35037bdafba87ad57db200'
+            verification_output="$("$apksigner" verify --verbose --print-certs "$signed_apk")"
+            printf '%s\n' "$verification_output"
+            printf '%s\n' "$verification_output" | grep -Eqi \
+              'certificate SHA-256 digest: b170604e596e8cf66cfeb985cdfaa14796b1bd5dcf35037bdafba87ad57db200$'
             rm -f "$unsigned_apk" "$aligned_apk"
           done
 
