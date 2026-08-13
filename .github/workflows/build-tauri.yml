@@ -302,9 +302,6 @@ jobs:
       - name: Build optimized release APK
         working-directory: apps/readest-app
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
           CARGO_PROFILE_RELEASE_DEBUG: "0"
@@ -315,35 +312,61 @@ jobs:
         run: |
           rm -rf src-tauri/gen/android
           pnpm tauri android init --ci
-          test -n "$ANDROID_KEYSTORE_BASE64"
-          test -n "$ANDROID_KEY_ALIAS"
-          test -n "$ANDROID_KEY_PASSWORD"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > src-tauri/gen/android/release.jks
-          {
-            printf 'password=%s\n' "$ANDROID_KEY_PASSWORD"
-            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
-            printf 'storeFile=%s\n' "$PWD/src-tauri/gen/android/release.jks"
-          } > src-tauri/gen/android/keystore.properties
           pnpm build
           find out -type f -name '*.map' -delete
           pnpm tauri android build --target "${{ matrix.target }}" --apk --ci --config '{"build":{"beforeBuildCommand":""}}'
 
-      - name: Verify Android APK signature
+      - name: Sign and verify Android APK
         working-directory: apps/readest-app
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          umask 077
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+
+          keystore="$RUNNER_TEMP/readest-android-release.jks"
+          password_file="$RUNNER_TEMP/readest-android-signing-password"
+          trap 'rm -f "$keystore" "$password_file"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          printf '%s' "$ANDROID_KEY_PASSWORD" > "$password_file"
+          chmod 600 "$keystore"
+          chmod 600 "$password_file"
+          unset ANDROID_KEYSTORE_BASE64 ANDROID_KEY_PASSWORD
+
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          zipalign="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign -print | sort -V | tail -n 1)"
           test -n "$apksigner"
-          mapfile -d '' apks < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -print0)
-          test "${#apks[@]}" -gt 0
-          for apk in "${apks[@]}"; do
-            "$apksigner" verify --verbose --print-certs "$apk"
+          test -n "$zipalign"
+
+          mapfile -d '' unsigned_apks < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name '*-unsigned.apk' -print0)
+          test "${#unsigned_apks[@]}" -gt 0
+          for unsigned_apk in "${unsigned_apks[@]}"; do
+            aligned_apk="${unsigned_apk%.apk}-aligned.apk"
+            signed_apk="${unsigned_apk%-unsigned.apk}.apk"
+            "$zipalign" -f -p 4 "$unsigned_apk" "$aligned_apk"
+            "$apksigner" sign \
+              --ks "$keystore" \
+              --ks-key-alias "$ANDROID_KEY_ALIAS" \
+              --ks-pass "file:$password_file" \
+              --key-pass "file:$password_file" \
+              --out "$signed_apk" \
+              "$aligned_apk"
+            "$apksigner" verify --verbose --print-certs "$signed_apk"
+            "$apksigner" verify --print-certs "$signed_apk" | grep -qi \
+              'Signer #1 certificate SHA-256 digest: b170604e596e8cf66cfeb985cdfaa14796b1bd5dcf35037bdafba87ad57db200'
+            rm -f "$unsigned_apk" "$aligned_apk"
           done
 
       - name: Upload Android release APK
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: readest-android-${{ matrix.abi }}-release-${{ github.sha }}
-          path: apps/readest-app/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          path: apps/readest-app/src-tauri/gen/android/app/build/outputs/apk/**/*-release.apk
           if-no-files-found: error
           retention-days: 14
 

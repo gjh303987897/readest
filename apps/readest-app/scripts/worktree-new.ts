@@ -271,10 +271,10 @@ if (fs.existsSync(srcAppleGen) && !fs.existsSync(appleGenDir)) {
   });
 }
 
-// Symlink the remaining shared gen dirs (schemas are generated at build time
-// and don't differ per branch; keystore.properties is signing config that
-// must stay identical across worktrees to produce matching APKs).
-for (const sub of ['schemas', 'android/keystore.properties']) {
+// Symlink schemas, which are generated at build time and don't differ per
+// branch. Signing configuration is intentionally never shared between
+// worktrees.
+for (const sub of ['schemas']) {
   const src = path.join(srcAppDir, 'src-tauri', 'gen', sub);
   const dst = path.join(genDir, sub);
   if (fs.existsSync(src) && !fs.existsSync(dst)) {
