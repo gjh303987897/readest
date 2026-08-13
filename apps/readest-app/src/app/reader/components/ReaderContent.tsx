@@ -152,12 +152,12 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
   };
 
   const handlePrivacyLock = (event: CustomEvent) => {
+    const blockAll = (event.detail as { blockAll?: boolean } | undefined)?.blockAll === true;
     const hiddenBookHashes =
       (event.detail as { hiddenBookHashes?: string[] } | undefined)?.hiddenBookHashes ??
       usePrivacyStore.getState().hiddenBookHashes;
-    const hasPrivateBookOpen = bookKeys.some((key) =>
-      hiddenBookHashes.includes(key.split('-')[0]!),
-    );
+    const hasPrivateBookOpen =
+      blockAll || bookKeys.some((key) => hiddenBookHashes.includes(key.split('-')[0]!));
     if (!hasPrivateBookOpen) return false;
     const settings = useSettingsStore.getState().settings;
     const library = useLibraryStore.getState().library;

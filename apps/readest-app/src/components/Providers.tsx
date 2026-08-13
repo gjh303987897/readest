@@ -16,11 +16,17 @@ import { useSidebarStore } from '@/store/sidebarStore';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useSafeAreaInsets } from '@/hooks/useSafeAreaInsets';
 import { useSettingsSync } from '@/hooks/useSettingsSync';
+import { usePrivacySync } from '@/hooks/usePrivacySync';
 import { useDefaultIconSize } from '@/hooks/useResponsiveSize';
 import { useEinkMode } from '@/hooks/useEinkMode';
 import { getLocale } from '@/utils/misc';
 import { getDirFromUILanguage } from '@/utils/rtl';
 import { getAndroidPatchedViewportContent } from '@/utils/viewport';
+
+const PrivacySyncBridge = () => {
+  usePrivacySync();
+  return null;
+};
 
 const Providers = ({ children }: { children: React.ReactNode }) => {
   const { envConfig, appService } = useEnv();
@@ -34,7 +40,14 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     const cleanupPrivacyStore = initializePrivacyStore();
     const unsubscribe = usePrivacyStore.subscribe((state, previous) => {
-      if (state.isUnlocked || !previous.isUnlocked) return;
+      const cloudLockActivated = state.isCloudUnlockRequired && !previous.isCloudUnlockRequired;
+      const privacyModeLocked = !state.isUnlocked && previous.isUnlocked;
+      if (!cloudLockActivated && !privacyModeLocked) return;
+      if (cloudLockActivated) {
+        useBookDataStore.setState({ booksData: {} });
+        useSidebarStore.setState({ searchNavStates: {}, searchStatuses: {} });
+        return;
+      }
       const hiddenHashes = new Set([...previous.hiddenBookHashes, ...state.hiddenBookHashes]);
       hiddenHashes.forEach((hash) => useBookDataStore.getState().clearBookData(hash));
       useSidebarStore.setState((sidebarState) => ({
@@ -87,6 +100,7 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <AuthProvider>
+      <PrivacySyncBridge />
       <IconContext.Provider value={{ size: `${iconSize}px` }}>
         <SyncProvider>
           <DropdownProvider>{children}</DropdownProvider>

@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>com.bilingify.readest</id>
-  <name>Readest</name>
+  <name>readest-tiny</name>
   <summary>Read and manage ebooks</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>AGPL-3.0-only</project_license>
   <launchable type="desktop-id">com.bilingify.readest.desktop</launchable>
   <url type="homepage">https://github.com/readest/readest</url>
   <description>
-    <p>Readest is an ebook reader and library application.</p>
+    <p>readest-tiny is an ebook reader and library application.</p>
   </description>
 </component>

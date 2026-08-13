@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Readest
+Name=readest-tiny
 Comment=Read and manage ebooks
 Exec=readest-flatpak %U
 Icon=com.bilingify.readest

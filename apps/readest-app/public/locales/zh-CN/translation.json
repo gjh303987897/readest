@@ -1730,6 +1730,8 @@
   "Hidden in Privacy Mode": "已在隐私模式中隐藏",
   "Privacy Mode Locked": "隐私模式已锁定",
   "Enter your PIN to access this private book and its related data.": "输入 PIN 码以访问这本隐私书籍及其相关数据。",
+  "Synced privacy settings require your PIN before books can be shown": "已同步的隐私设置需要输入 PIN 码后才能显示书籍",
+  "Privacy settings sync as encrypted data after you sign in. Original book files are not encrypted or renamed.": "登录后，隐私设置将以加密数据同步。原始书籍文件不会被加密或重命名。",
   "No downloadable format available": "没有可下载的格式",
   "Content is neither valid XML nor JSON": "内容既不是有效的 XML 也不是 JSON",
   "Clear Pending": "清除等待中",

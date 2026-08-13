@@ -9,8 +9,17 @@ import { BoxedList, SettingsInput, SettingsRow, Tips } from './primitives';
 
 const PrivacyPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => {
   const _ = useTranslation();
-  const { hasPin, isUnlocked, hiddenBookHashes, setPin, changePin, removePin, unlock, lock } =
-    usePrivacyStore();
+  const {
+    hasPin,
+    isUnlocked,
+    isCloudUnlockRequired,
+    hiddenBookHashes,
+    setPin,
+    changePin,
+    removePin,
+    unlock,
+    lock,
+  } = usePrivacyStore();
   const [currentPin, setCurrentPin] = useState('');
   const [nextPin, setNextPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -96,11 +105,13 @@ const PrivacyPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => 
         <SettingsRow
           label={hasPin ? _('Privacy mode enabled') : _('Set privacy PIN')}
           description={
-            hasPin
-              ? isUnlocked
-                ? _('{{count}} hidden book(s)', { count: hiddenBookHashes.length })
-                : _('Hidden books are not shown while privacy mode is locked')
-              : _('Use a numeric PIN with 4 to 12 digits')
+            isCloudUnlockRequired
+              ? _('Synced privacy settings require your PIN before books can be shown')
+              : hasPin
+                ? isUnlocked
+                  ? _('{{count}} hidden book(s)', { count: hiddenBookHashes.length })
+                  : _('Hidden books are not shown while privacy mode is locked')
+                : _('Use a numeric PIN with 4 to 12 digits')
           }
         >
           {hasPin ? <ShieldCheck className='h-5 w-5' /> : <Lock className='h-5 w-5 opacity-60' />}
@@ -123,23 +134,27 @@ const PrivacyPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => 
             </button>
           </SettingsRow>
         )}
-        <SettingsRow label={hasPin ? _('New PIN') : _('PIN')}>
-          {pinInput(nextPin, setNextPin, hasPin ? _('New PIN') : _('PIN'))}
-        </SettingsRow>
-        <SettingsRow label={_('Confirm PIN')}>
-          {pinInput(confirmPin, setConfirmPin, _('Confirm PIN'))}
-        </SettingsRow>
-        <SettingsRow label={hasPin ? _('Change PIN') : _('Enable Privacy Mode')}>
-          <button
-            type='button'
-            className='btn btn-contrast btn-sm'
-            disabled={busy}
-            onClick={() => void savePin()}
-          >
-            <ShieldCheck className='h-4 w-4' />
-            {_('Save')}
-          </button>
-        </SettingsRow>
+        {!isCloudUnlockRequired && (
+          <>
+            <SettingsRow label={hasPin ? _('New PIN') : _('PIN')}>
+              {pinInput(nextPin, setNextPin, hasPin ? _('New PIN') : _('PIN'))}
+            </SettingsRow>
+            <SettingsRow label={_('Confirm PIN')}>
+              {pinInput(confirmPin, setConfirmPin, _('Confirm PIN'))}
+            </SettingsRow>
+            <SettingsRow label={hasPin ? _('Change PIN') : _('Enable Privacy Mode')}>
+              <button
+                type='button'
+                className='btn btn-contrast btn-sm'
+                disabled={busy}
+                onClick={() => void savePin()}
+              >
+                <ShieldCheck className='h-4 w-4' />
+                {_('Save')}
+              </button>
+            </SettingsRow>
+          </>
+        )}
         {hasPin && isUnlocked && (
           <SettingsRow label={_('Lock Privacy Mode')}>
             <button type='button' className='btn btn-ghost btn-sm eink-bordered' onClick={lock}>
@@ -148,7 +163,7 @@ const PrivacyPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => 
             </button>
           </SettingsRow>
         )}
-        {hasPin && (
+        {hasPin && !isCloudUnlockRequired && (
           <SettingsRow label={_('Disable Privacy Mode')}>
             <button
               type='button'
@@ -166,7 +181,7 @@ const PrivacyPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => 
       {status && <p className='text-center text-sm'>{status}</p>}
       <Tips>
         {_(
-          'Privacy mode hides books on this device, but it does not encrypt or rename the original book files.',
+          'Privacy settings sync as encrypted data after you sign in. Original book files are not encrypted or renamed.',
         )}
       </Tips>
     </div>

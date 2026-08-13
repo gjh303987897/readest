@@ -1,4 +1,4 @@
-describe('Readest App Launch', () => {
+describe('readest-tiny App Launch', () => {
   it('should have a visible body element', async () => {
     const body = await $('body');
     await body.waitForDisplayed({ timeout: 10000 });
@@ -101,7 +101,7 @@ describe('JavaScript Execution', () => {
     const title = await browser.execute(() => {
       return document.title;
     });
-    expect(title).toContain('Readest');
+    expect(title).toContain('readest-tiny');
   });
 
   it('should detect the app platform globals', async () => {

@@ -33,7 +33,8 @@ const buildHashIndex = (books: Book[]) =>
   new Map(books.map((book, index) => [book.hash, index] as const));
 
 const visibleBooks = (books: Book[]) => {
-  const { hiddenBookHashes, isUnlocked } = usePrivacyStore.getState();
+  const { hiddenBookHashes, isUnlocked, isCloudUnlockRequired } = usePrivacyStore.getState();
+  if (isCloudUnlockRequired) return [];
   return filterAccessibleBooks(
     books.filter((book) => !book.deletedAt),
     hiddenBookHashes,
@@ -119,6 +120,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 usePrivacyStore.subscribe((state, previous) => {
   if (
     state.isUnlocked === previous.isUnlocked &&
+    state.isCloudUnlockRequired === previous.isCloudUnlockRequired &&
     state.hiddenBookHashes === previous.hiddenBookHashes
   ) {
     return;

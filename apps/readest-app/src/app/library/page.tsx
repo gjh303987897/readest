@@ -229,7 +229,7 @@ const LibraryPage = () => {
         uploadedAt: user ? null : book.uploadedAt,
       };
       await updateBook(envConfig, deletedBook);
-      if (hiddenBookHashes.includes(book.hash)) unhideBook(book.hash);
+      if (hiddenBookHashes.includes(book.hash)) await unhideBook(book.hash);
       clearBookData(book.hash);
       await pushLibrary();
     } catch {
@@ -239,11 +239,11 @@ const LibraryPage = () => {
     }
   };
 
-  const handlePrivacyToggle = (book: Book) => {
+  const handlePrivacyToggle = async (book: Book) => {
     if (hiddenBookHashes.includes(book.hash)) {
-      unhideBook(book.hash);
+      await unhideBook(book.hash);
     } else {
-      hideBook(book.hash);
+      await hideBook(book.hash);
     }
   };
 
@@ -258,7 +258,7 @@ const LibraryPage = () => {
       >
         <div className='flex min-w-0 shrink-0 items-center gap-2'>
           <BookOpen aria-hidden='true' className='h-5 w-5 shrink-0' />
-          <h1 className='truncate text-lg font-semibold'>Readest</h1>
+          <h1 className='truncate text-lg font-semibold'>readest-tiny</h1>
         </div>
 
         <label className='exclude-title-bar-mousedown bg-base-200 focus-within:ring-primary mx-auto flex h-9 min-w-0 max-w-md flex-1 items-center gap-2 rounded px-3 focus-within:ring-1'>
@@ -471,7 +471,7 @@ const LibraryPage = () => {
                                   ? _('Remove from Privacy Mode')
                                   : _('Hide in Privacy Mode')
                               }
-                              onClick={() => handlePrivacyToggle(book)}
+                              onClick={() => void handlePrivacyToggle(book)}
                             />
                           </ul>
                         </Dropdown>

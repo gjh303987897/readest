@@ -421,7 +421,7 @@ pub fn run() {
                     .decorations(false)
                     .visible(false)
                     .shadow(true)
-                    .title("Readest");
+                    .title("readest-tiny");
 
                 #[cfg(target_os = "windows")]
                 {

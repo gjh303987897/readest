@@ -9,6 +9,7 @@
 | 运行时配置 | `GET /runtime-config.js?format=json` | 返回 Supabase 和业务 API 地址 |
 | 用户认证 | Supabase Auth SDK | 邮箱注册、登录、密码找回、令牌刷新和退出 |
 | 元数据同步 | `GET/POST /api/sync` | 同步书库、阅读进度和书签 |
+| 隐私模式同步 | `GET/PUT /api/privacy-sync` | 端到端加密同步隐私 PIN 配置和隐藏书籍列表 |
 | 文件上传 | `POST /api/storage/upload` | 登记文件并返回预签名 PUT URL |
 | 文件下载 | `GET/POST /api/storage/download` | 返回一个或一批预签名 GET URL |
 | 文件删除 | `DELETE /api/storage/delete` | 删除对象和文件记录 |
@@ -41,7 +42,7 @@ Authorization: Bearer <supabase_access_token>
 }
 ```
 
-当前实现使用 HTTP `403`，不是 `401`。后端必须从令牌解析当前用户，且不能信任请求体中的 `user_id`。数据库中的 `books`、`book_configs`、`book_notes` 和 `files` 均应按用户启用行级访问控制。
+当前实现使用 HTTP `403`，不是 `401`。后端必须从令牌解析当前用户，且不能信任请求体中的 `user_id`。数据库中的 `books`、`book_configs`、`book_notes`、`files` 和 `privacy_settings` 均应按用户启用行级访问控制。
 
 ## 数据与存储依赖
 
@@ -51,6 +52,7 @@ Authorization: Bearer <supabase_access_token>
 - `book_configs`：当前 CFI 位置与阅读进度。
 - `book_notes`：书签及未来的批注记录。
 - `files`：对象存储文件键、大小和归属。
+- `privacy_settings`：端到端加密的隐私模式单记录及冲突时间戳。
 
 对象存储需要支持 30 分钟有效期的预签名上传与下载 URL。当前代码可使用 S3 或 Cloudflare R2。
 
@@ -58,6 +60,7 @@ Authorization: Bearer <supabase_access_token>
 
 - [认证与运行时配置](./auth-and-runtime.md)
 - [同步 API](./sync.md)
+- [隐私模式同步 API](./privacy-sync.md)
 - [对象存储 API](./storage.md)
 
 ## 实现验收
@@ -69,3 +72,4 @@ Authorization: Bearer <supabase_access_token>
 3. 一台设备新增、改名或删除书签后，另一台设备重新打开同一本书能得到相同结果。
 4. 支持格式的书籍文件和 `cover.png` 能上传、下载和删除。
 5. 用户无法读取、覆盖或删除其他用户的记录与对象。
+6. 一台设备隐藏书籍或关闭隐私模式后，另一台设备能拉取密文，并且只有正确 PIN 才能显示隐私数据。

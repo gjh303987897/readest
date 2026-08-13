@@ -43,7 +43,12 @@ const Reader: React.FC<{ ids?: string }> = ({ ids }) => {
   const { isSideBarVisible, isSideBarPinned } = useSidebarStore();
   const { getIsSideBarVisible, setSideBarVisible } = useSidebarStore();
   const { isDarkMode, systemUIAlwaysHidden, isRoundedWindow } = useThemeStore();
-  const { isInitialized: privacyInitialized, isUnlocked, hiddenBookHashes } = usePrivacyStore();
+  const {
+    isInitialized: privacyInitialized,
+    isUnlocked,
+    isCloudUnlockRequired,
+    hiddenBookHashes,
+  } = usePrivacyStore();
   const [showPrivacyUnlock, setShowPrivacyUnlock] = React.useState(false);
 
   const requestedIds = React.useMemo(() => {
@@ -58,8 +63,9 @@ const Reader: React.FC<{ ids?: string }> = ({ ids }) => {
   );
   const privacyBlocked =
     privacyInitialized &&
-    !isUnlocked &&
-    [...requestedIds, ...openBookIds].some((id) => hiddenBookHashes.includes(id));
+    (isCloudUnlockRequired ||
+      (!isUnlocked &&
+        [...requestedIds, ...openBookIds].some((id) => hiddenBookHashes.includes(id))));
 
   useTheme({ systemUIVisible: settings.alwaysShowStatusBar, appThemeColor: 'base-100' });
   useScreenWakeLock(settings.screenWakeLock, appService?.hasWindow);

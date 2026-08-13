@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createEncryptedPrivacyEnvelope,
   createPrivacyCredential,
+  decryptPrivacyEnvelope,
   filterAccessibleBooks,
   verifyPrivacyPin,
 } from '@/services/privacyService';
@@ -43,5 +45,21 @@ describe('privacyService', () => {
       'public',
       'private',
     ]);
+  });
+
+  it('encrypts synced privacy data without exposing the PIN or hidden hashes', async () => {
+    const credential = await createPrivacyCredential('1234');
+    const envelope = await createEncryptedPrivacyEnvelope('1234', {
+      credential,
+      hiddenBookHashes: ['private-book-hash'],
+    });
+
+    expect(JSON.stringify(envelope)).not.toContain('1234');
+    expect(JSON.stringify(envelope)).not.toContain('private-book-hash');
+    await expect(decryptPrivacyEnvelope('1234', envelope)).resolves.toEqual({
+      credential,
+      hiddenBookHashes: ['private-book-hash'],
+    });
+    await expect(decryptPrivacyEnvelope('0000', envelope)).rejects.toThrow();
   });
 });

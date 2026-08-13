@@ -8,16 +8,15 @@ import Providers from '@/components/Providers';
 import '../styles/globals.css';
 
 const url = 'https://web.readest.com/';
-const title = 'Readest — Where You Read, Digest and Get Insight';
-const description =
-  'Read EPUB, PDF, MOBI and other e-book formats with account-based progress sync and book backup.';
+const title = 'readest-tiny';
+const description = 'A local-first ebook reader and library with optional self-hosted sync.';
 const previewImage = 'https://cdn.readest.com/images/open_graph_preview_read_now.png';
 
 export const metadata: Metadata = {
   metadataBase: new URL(url),
   title: {
     default: title,
-    template: '%s | Readest',
+    template: '%s | readest-tiny',
   },
   description,
   generator: 'Next.js',
@@ -25,7 +24,7 @@ export const metadata: Metadata = {
   keywords: ['epub', 'pdf', 'ebook', 'reader', 'readest', 'pwa'],
   authors: [
     {
-      name: 'readest',
+      name: 'readest-tiny',
       url: 'https://github.com/readest/readest',
     },
   ],
@@ -35,7 +34,7 @@ export const metadata: Metadata = {
   },
   appleWebApp: {
     capable: true,
-    title: 'Readest',
+    title: 'readest-tiny',
     statusBarStyle: 'default',
   },
   openGraph: {
