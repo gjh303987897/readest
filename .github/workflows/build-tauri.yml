@@ -47,6 +47,10 @@ jobs:
       - name: Prepare bundled web assets
         run: pnpm --filter @readest/readest-app setup-vendors
 
+      - name: Generate platform icons
+        working-directory: apps/readest-app
+        run: pnpm icons:generate
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
@@ -139,6 +143,10 @@ jobs:
       - name: Prepare bundled web assets
         run: pnpm --filter @readest/readest-app setup-vendors
 
+      - name: Generate platform icons
+        working-directory: apps/readest-app
+        run: pnpm icons:generate
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
@@ -207,6 +215,10 @@ jobs:
 
       - name: Prepare bundled web assets
         run: pnpm --filter @readest/readest-app setup-vendors
+
+      - name: Generate platform icons
+        working-directory: apps/readest-app
+        run: pnpm icons:generate
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -312,6 +324,7 @@ jobs:
         run: |
           rm -rf src-tauri/gen/android
           pnpm tauri android init --ci
+          pnpm icons:generate
           pnpm build
           find out -type f -name '*.map' -delete
           pnpm tauri android build --target "${{ matrix.target }}" --apk --ci --config '{"build":{"beforeBuildCommand":""}}'
@@ -417,6 +430,7 @@ jobs:
         run: |
           rm -rf src-tauri/gen/apple
           pnpm tauri ios init --ci
+          pnpm icons:generate
           pnpm tauri ios build --debug --target aarch64-sim --ci --no-sign
 
       - name: Archive iOS simulator app

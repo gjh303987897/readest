@@ -38,6 +38,7 @@ if ! grep -q 'MANAGE_EXTERNAL_STORAGE' "$MANIFEST"; then
 fi
 
 source .env.google-play.local
+pnpm icons:generate
 echo "🚀 Running: pnpm tauri android build (googleplay flavor)"
 ORG_GRADLE_PROJECT_storeFlavor=googleplay pnpm tauri android build --config src-tauri/tauri.playstore.conf.json
 

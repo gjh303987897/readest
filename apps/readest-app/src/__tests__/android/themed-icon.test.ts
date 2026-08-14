@@ -14,26 +14,38 @@ import { resolve } from 'path';
  * and silently dropped the `<monochrome>` layer — so themed icons stopped
  * working in shipped builds.
  *
- * The CI/release flow regenerates `gen/android` from scratch
- * (`tauri android init` + `tauri icon`) and then `git checkout .` to restore the
- * *tracked* customizations. `tauri icon` does not emit a monochrome layer, so
- * the themed icon only survives if both the adaptive-icon XML and the
- * monochrome mipmaps are tracked under `gen/`.
+ * Mobile projects under `src-tauri/gen` are ignored and regenerated, so the
+ * committed icon sources and manifest must contain every customization needed
+ * to reproduce the adaptive icon in CI and release builds.
  *
  * Invariants:
- *  1. The committed adaptive icon declares a `<monochrome>` layer pointing at
+ *  1. The icon manifest declares padded foreground and monochrome sources.
+ *  2. The committed adaptive icon declares a `<monochrome>` layer pointing at
  *     `@mipmap/ic_launcher_monochrome`.
- *  2. A tracked `ic_launcher_monochrome.png` exists for every launcher density
- *     so the resource resolves at build time (these are force-added past the
- *     `gen/` .gitignore, like the other customized resources).
+ *  3. A committed `ic_launcher_monochrome.png` exists for every launcher
+ *     density so the resource resolves when a mobile project is regenerated.
  */
 
 const appRoot = process.cwd();
-const resRoot = resolve(appRoot, 'src-tauri/gen/android/app/src/main/res');
+const repoRoot = resolve(appRoot, '../..');
+const resRoot = resolve(appRoot, 'src-tauri/icons/android');
+const manifestPath = resolve(repoRoot, 'data/icons/readest-icon-manifest.json');
 
 const DENSITIES = ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'];
 
 describe('Android themed (monochrome) launcher icon', () => {
+  it('generates adaptive layers from committed source assets', () => {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      android_fg: string;
+      android_monochrome: string;
+    };
+
+    expect(manifest.android_fg).toBe('readest-book-android-foreground.png');
+    expect(manifest.android_monochrome).toBe('readest-book-monochrome.png');
+    expect(existsSync(resolve(repoRoot, 'data/icons', manifest.android_fg))).toBe(true);
+    expect(existsSync(resolve(repoRoot, 'data/icons', manifest.android_monochrome))).toBe(true);
+  });
+
   it('declares a <monochrome> layer in the adaptive icon', () => {
     const xml = readFileSync(resolve(resRoot, 'mipmap-anydpi-v26/ic_launcher.xml'), 'utf8');
     expect(xml).toMatch(/<monochrome\b/);

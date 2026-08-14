@@ -1,0 +1,6 @@
+{
+  "default": "readest-book.png",
+  "bg_color": "#ffffff",
+  "android_fg": "readest-book-android-foreground.png",
+  "android_monochrome": "readest-book-monochrome.png"
+}

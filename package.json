@@ -6,6 +6,7 @@
     "test": "pnpm --filter @readest/readest-app test",
     "lint": "pnpm --filter @readest/readest-app lint",
     "tauri": "pnpm --filter @readest/readest-app tauri",
+    "icons:generate": "pnpm --filter @readest/readest-app icons:generate",
     "dev-web": "pnpm --filter @readest/readest-app dev-web",
     "prepare": "husky",
     "fmt:check": "pnpm --filter @readest/readest-app fmt:check",

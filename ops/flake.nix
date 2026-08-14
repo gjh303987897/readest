@@ -155,8 +155,7 @@
             postInit = ''
               rm -rf apps/readest-app/src-tauri/gen/android
               pnpm tauri android init
-              git checkout apps/readest-app/src-tauri/gen/android
-              pnpm tauri icon ../../data/icons/readest-book.png
+              pnpm --filter @readest/readest-app icons:generate
 
               if [ ! -d "$ANDROID_AVD_HOME/${name}.avd" ]; then
                   avdmanager create avd \

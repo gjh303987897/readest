@@ -5,6 +5,7 @@
 # how 0.11.18 shipped with a dead widget despite the guard existing).
 set -euo pipefail
 
+pnpm icons:generate
 pnpm tauri ios build --export-method app-store-connect
 
 BUNDLE_DIR=src-tauri/gen/apple/build/arm64

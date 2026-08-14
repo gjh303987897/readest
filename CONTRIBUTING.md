@@ -91,10 +91,9 @@ pnpm preview
 The following must be run once before running the Android app. Note that this is done automatically if using the nix Android devshell:
 
 ```bash
-rm apps/readest-app/src-tauri/gen/android
+rm -rf apps/readest-app/src-tauri/gen/android
 pnpm tauri android init
-pnpm tauri icon ../../data/icons/readest-book.png
-git checkout apps/readest-app/src-tauri/gen/android
+pnpm icons:generate
 ```
 
 To run the Android app:
@@ -110,7 +109,7 @@ pnpm tauri android dev --host
 ```bash
 # Set up the iOS environment (run once)
 pnpm tauri ios init
-pnpm tauri icon ../../data/icons/readest-book.png
+pnpm icons:generate
 
 pnpm tauri ios dev
 # or if you want to dev on a real device
@@ -120,6 +119,7 @@ pnpm tauri ios dev --host
 ### 5. Build for Production
 
 ```bash
+pnpm icons:generate
 pnpm tauri build
 pnpm tauri android build
 pnpm tauri ios build
