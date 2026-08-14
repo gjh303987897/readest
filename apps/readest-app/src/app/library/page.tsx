@@ -7,7 +7,8 @@ import {
   Cloud,
   CloudDownload,
   CloudUpload,
-  Download,
+  HardDrive,
+  LibraryBig,
   LoaderCircle,
   Lock,
   LockOpen,
@@ -33,6 +34,7 @@ import { useAppRouter } from '@/hooks/useAppRouter';
 import { useLibraryStore } from '@/store/libraryStore';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useTransferStore } from '@/store/transferStore';
 import { ingestFile } from '@/services/ingestService';
 import { eventDispatcher } from '@/utils/event';
 import { formatAuthors } from '@/utils/book';
@@ -46,9 +48,11 @@ import SettingsDialog from '@/components/settings/SettingsDialog';
 import Dropdown from '@/components/Dropdown';
 import MenuItem from '@/components/MenuItem';
 import PrivacyUnlockDialog from '@/components/PrivacyUnlockDialog';
+import OpdsDialog from './components/OpdsDialog';
 import { usePrivacyStore } from '@/store/privacyStore';
 import { useBooksSync } from './hooks/useBooksSync';
 import { useBookTransferActions } from './hooks/useBookTransferActions';
+import { getBookStorageStatus } from './utils/bookStorageStatus';
 
 const progressPercent = (book: Book) => {
   const [current, total] = book.progress ?? [0, 0];
@@ -76,11 +80,26 @@ const LibraryPage = () => {
   const [importing, setImporting] = useState(false);
   const [busyBookHash, setBusyBookHash] = useState<string | null>(null);
   const [isUnlockDialogOpen, setUnlockDialogOpen] = useState(false);
+  const [isOpdsDialogOpen, setOpdsDialogOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const showWindowControls = !!appService?.hasWindowBar && !appService.hasTrafficLight;
 
   useTheme({ systemUIVisible: true, appThemeColor: 'base-100' });
   useTransferQueue(libraryLoaded);
+  const transfers = useTransferStore((state) => state.transfers);
+  const downloadingBookHashes = useMemo(
+    () =>
+      new Set(
+        Object.values(transfers)
+          .filter(
+            (transfer) =>
+              transfer.type === 'download' &&
+              (transfer.status === 'pending' || transfer.status === 'in_progress'),
+          )
+          .map((transfer) => transfer.bookHash),
+      ),
+    [transfers],
+  );
 
   useEffect(() => {
     if (!isUnlocked) setQuery('');
@@ -149,6 +168,22 @@ const LibraryPage = () => {
     }
   };
 
+  const importOpdsFile = async (file: File): Promise<boolean> => {
+    if (!appService) return false;
+    try {
+      const book = await ingestFile(
+        { file, books: useLibraryStore.getState().library },
+        { appService, settings, isLoggedIn: !!user },
+      );
+      if (!book) return false;
+      await updateBook(envConfig, book);
+      return true;
+    } catch (error) {
+      console.error('Failed to import OPDS book', error);
+      return false;
+    }
+  };
+
   useEffect(() => {
     if (!libraryLoaded || !appService || !checkOpenWithBooks || importing) return;
     setCheckOpenWithBooks(false);
@@ -202,7 +237,12 @@ const LibraryPage = () => {
 
   const handleRemoveLocalCopy = async (book: Book) => {
     if (!appService || busyBookHash) return;
-    if (!window.confirm(_('Remove the local copy of {{title}}?', { title: book.title }))) return;
+    if (
+      !window.confirm(
+        _('Remove the local copy of {{title}} and keep the cloud copy?', { title: book.title }),
+      )
+    )
+      return;
     setBusyBookHash(book.hash);
     try {
       await appService.deleteBook(book, 'local');
@@ -217,7 +257,15 @@ const LibraryPage = () => {
 
   const handleDelete = async (book: Book) => {
     if (!appService || busyBookHash) return;
-    if (!window.confirm(_('Delete {{title}} from your library?', { title: book.title }))) return;
+    if (book.uploadedAt && !user) {
+      navigateToLogin(router);
+      return;
+    }
+    const confirmation =
+      user && book.uploadedAt
+        ? _('Delete {{title}} locally and from the cloud?', { title: book.title })
+        : _('Delete {{title}} from this device?', { title: book.title });
+    if (!window.confirm(confirmation)) return;
     setBusyBookHash(book.hash);
     try {
       await appService.deleteBook(book, user ? 'both' : 'local');
@@ -295,20 +343,34 @@ const LibraryPage = () => {
               <RefreshCw className='h-4 w-4' />
             </button>
           )}
-          <button
-            type='button'
-            className='btn btn-ghost btn-square h-9 min-h-9 w-9'
-            title={_('Import Books')}
-            aria-label={_('Import Books')}
-            onClick={() => void handleImport()}
+          <Dropdown
+            label={_('Import Books')}
+            className='dropdown-end'
+            buttonClassName='btn btn-ghost btn-square h-9 min-h-9 w-9'
+            toggleButton={
+              importing ? (
+                <LoaderCircle className='h-4 w-4 animate-spin' />
+              ) : (
+                <Upload className='h-4 w-4' />
+              )
+            }
             disabled={importing || !appService}
           >
-            {importing ? (
-              <LoaderCircle className='h-4 w-4 animate-spin' />
-            ) : (
-              <Upload className='h-4 w-4' />
-            )}
-          </button>
+            <ul className='menu dropdown-content bg-base-100 eink-bordered z-50 w-56 rounded-lg border p-2 shadow'>
+              <MenuItem
+                transient
+                label={_('From Local File')}
+                Icon={<Upload className='h-4 w-4' />}
+                onClick={() => void handleImport()}
+              />
+              <MenuItem
+                transient
+                label={_('From OPDS Catalog')}
+                Icon={<LibraryBig className='h-4 w-4' />}
+                onClick={() => setOpdsDialogOpen(true)}
+              />
+            </ul>
+          </Dropdown>
           <button
             type='button'
             className='btn btn-ghost btn-square h-9 min-h-9 w-9'
@@ -350,10 +412,16 @@ const LibraryPage = () => {
             {query ? _('No books found') : _('Your library is empty')}
           </p>
           {!query && (
-            <button className='btn btn-primary btn-sm' onClick={() => void handleImport()}>
-              <Upload className='h-4 w-4' />
-              {_('Import Books')}
-            </button>
+            <div className='flex flex-wrap items-center justify-center gap-2'>
+              <button className='btn btn-primary btn-sm' onClick={() => void handleImport()}>
+                <Upload className='h-4 w-4' />
+                {_('Import Books')}
+              </button>
+              <button className='btn btn-ghost btn-sm' onClick={() => setOpdsDialogOpen(true)}>
+                <LibraryBig className='h-4 w-4' />
+                {_('From OPDS Catalog')}
+              </button>
+            </div>
           )}
         </div>
       ) : (
@@ -365,6 +433,18 @@ const LibraryPage = () => {
             const percent = progressPercent(book);
             const busy = busyBookHash === book.hash;
             const isPrivate = hiddenBookHashes.includes(book.hash);
+            const isDownloading =
+              downloadingBookHashes.has(book.hash) ||
+              (busy && !!book.uploadedAt && !book.downloadedAt);
+            const storageStatus = getBookStorageStatus(book, isDownloading);
+            const storageLabel =
+              storageStatus === 'syncing'
+                ? _('Syncing from cloud')
+                : storageStatus === 'local'
+                  ? book.uploadedAt
+                    ? _('Stored locally and backed up')
+                    : _('Stored locally')
+                  : _('Stored in cloud');
             return (
               <article key={book.hash} className='group min-w-0'>
                 <button
@@ -402,68 +482,76 @@ const LibraryPage = () => {
                     <div className='bg-primary h-full' style={{ width: `${percent}%` }} />
                   </div>
                   <div className='mt-1 flex h-8 items-center justify-between'>
-                    <span className='text-base-content/60 text-xs'>{percent}%</span>
-                    <div className='flex items-center gap-1'>
-                      <button
-                        type='button'
-                        className='btn btn-ghost btn-square h-7 min-h-7 w-7'
-                        title={
-                          !user
-                            ? _('Log In')
-                            : !book.uploadedAt
-                              ? _('Upload Book')
-                              : !book.downloadedAt
-                                ? _('Download Book')
-                                : _('Backed Up')
-                        }
-                        aria-label={
-                          !book.uploadedAt
-                            ? _('Upload Book')
-                            : !book.downloadedAt
-                              ? _('Download Book')
-                              : _('Backed Up')
-                        }
-                        onClick={() => void handleCloudAction(book)}
-                        disabled={busy || (!!book.uploadedAt && !!book.downloadedAt)}
+                    <div className='text-base-content/60 flex min-w-0 items-center gap-2 text-xs'>
+                      <span>{percent}%</span>
+                      <span
+                        className='flex h-5 w-5 shrink-0 items-center justify-center'
+                        title={storageLabel}
+                        aria-label={storageLabel}
+                        role='img'
                       >
-                        {!book.uploadedAt ? (
-                          <CloudUpload className='h-4 w-4' />
-                        ) : !book.downloadedAt ? (
-                          <CloudDownload className='h-4 w-4' />
+                        {storageStatus === 'syncing' ? (
+                          <LoaderCircle className='h-3.5 w-3.5 animate-spin' />
+                        ) : storageStatus === 'local' ? (
+                          <HardDrive className='h-3.5 w-3.5' />
                         ) : (
-                          <Cloud className='h-4 w-4' />
+                          <Cloud className='h-3.5 w-3.5' />
                         )}
-                      </button>
-                      {book.uploadedAt && book.downloadedAt && (
+                      </span>
+                    </div>
+                    <div className='flex items-center gap-1'>
+                      {(!book.uploadedAt || !book.downloadedAt) && (
                         <button
                           type='button'
                           className='btn btn-ghost btn-square h-7 min-h-7 w-7'
-                          title={_('Remove Local Copy')}
-                          aria-label={_('Remove Local Copy')}
-                          onClick={() => void handleRemoveLocalCopy(book)}
+                          title={
+                            !user
+                              ? _('Log In')
+                              : !book.uploadedAt
+                                ? _('Upload Book')
+                                : _('Download Book')
+                          }
+                          aria-label={
+                            !user
+                              ? _('Log In')
+                              : !book.uploadedAt
+                                ? _('Upload Book')
+                                : _('Download Book')
+                          }
+                          onClick={() => void handleCloudAction(book)}
                           disabled={busy}
                         >
-                          <Download className='h-4 w-4' />
+                          {!book.uploadedAt ? (
+                            <CloudUpload className='h-4 w-4' />
+                          ) : (
+                            <CloudDownload className='h-4 w-4' />
+                          )}
                         </button>
                       )}
-                      <button
-                        type='button'
-                        className='btn btn-ghost btn-square h-7 min-h-7 w-7'
-                        title={_('Delete Book')}
-                        aria-label={_('Delete Book')}
-                        onClick={() => void handleDelete(book)}
+                      <Dropdown
+                        label={_('Book Actions')}
+                        className='dropdown-end'
+                        buttonClassName='btn btn-ghost btn-square h-7 min-h-7 w-7'
+                        toggleButton={<MoreVertical className='h-4 w-4' />}
                         disabled={busy}
                       >
-                        <Trash2 className='h-4 w-4' />
-                      </button>
-                      {hasPin && isUnlocked && (
-                        <Dropdown
-                          label={_('Book Actions')}
-                          className='dropdown-end'
-                          buttonClassName='btn btn-ghost btn-square h-7 min-h-7 w-7'
-                          toggleButton={<MoreVertical className='h-4 w-4' />}
-                        >
-                          <ul className='menu dropdown-content bg-base-100 eink-bordered z-50 w-56 rounded-lg border p-2 shadow'>
+                        <ul className='menu dropdown-content bg-base-100 eink-bordered z-50 w-56 rounded-lg border p-2 shadow'>
+                          {book.uploadedAt && book.downloadedAt && (
+                            <MenuItem
+                              transient
+                              label={_('Remove Local Copy')}
+                              Icon={<HardDrive className='h-4 w-4' />}
+                              onClick={() => void handleRemoveLocalCopy(book)}
+                            />
+                          )}
+                          <MenuItem
+                            transient
+                            label={_('Delete Book')}
+                            labelClass='text-error'
+                            Icon={<Trash2 className='text-error h-4 w-4' />}
+                            onClick={() => void handleDelete(book)}
+                          />
+                          {hasPin && isUnlocked && (
                             <MenuItem
                               transient
                               label={
@@ -471,11 +559,12 @@ const LibraryPage = () => {
                                   ? _('Remove from Privacy Mode')
                                   : _('Hide in Privacy Mode')
                               }
+                              Icon={<Lock className='h-4 w-4' />}
                               onClick={() => void handlePrivacyToggle(book)}
                             />
-                          </ul>
-                        </Dropdown>
-                      )}
+                          )}
+                        </ul>
+                      </Dropdown>
                     </div>
                   </div>
                 </div>
@@ -485,6 +574,11 @@ const LibraryPage = () => {
         </section>
       )}
       {isSettingsDialogOpen && <SettingsDialog bookKey='' initialPanel='General' />}
+      <OpdsDialog
+        isOpen={isOpdsDialogOpen}
+        onClose={() => setOpdsDialogOpen(false)}
+        onImportFile={importOpdsFile}
+      />
       <PrivacyUnlockDialog isOpen={isUnlockDialogOpen} onClose={() => setUnlockDialogOpen(false)} />
       <Toast />
     </main>

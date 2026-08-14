@@ -275,6 +275,27 @@ describe('cloudService', () => {
         expect(deleteCloudFile).toHaveBeenCalledTimes(2);
       });
 
+      test('waits for remote cleanup before clearing uploadedAt', async () => {
+        const { deleteFile: deleteCloudFile } = await import('@/libs/storage');
+        const resolvers: Array<() => void> = [];
+        vi.mocked(deleteCloudFile).mockImplementation(
+          () => new Promise<void>((resolve) => resolvers.push(resolve)),
+        );
+        const book = createMockBook({ uploadedAt: 1000 });
+
+        const deletion = deleteBook(mockFs, book, 'cloud');
+        await vi.waitFor(() => expect(deleteCloudFile).toHaveBeenCalledTimes(1));
+        expect(book.uploadedAt).toBe(1000);
+
+        resolvers[0]!();
+        await vi.waitFor(() => expect(deleteCloudFile).toHaveBeenCalledTimes(2));
+        expect(book.uploadedAt).toBe(1000);
+
+        resolvers[1]!();
+        await deletion;
+        expect(book.uploadedAt).toBeNull();
+      });
+
       test('does not throw when cloud delete fails', async () => {
         const { deleteFile: deleteCloudFile } = await import('@/libs/storage');
         vi.mocked(deleteCloudFile).mockImplementation(() => {
