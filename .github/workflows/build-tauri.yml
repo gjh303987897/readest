@@ -13,8 +13,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  version:
+    name: Validate semantic version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate application version
+        run: |
+          node --test apps/readest-app/scripts/version.test.mjs
+          node apps/readest-app/scripts/version.mjs --check
+
   windows:
     name: Windows ${{ matrix.arch }} NSIS
+    needs: version
     runs-on: windows-latest
     timeout-minutes: 90
     strategy:
@@ -104,6 +118,7 @@ jobs:
 
   linux:
     name: Linux ${{ matrix.arch }} AppImage and Flatpak
+    needs: version
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -184,6 +199,7 @@ jobs:
 
   macos:
     name: macOS ${{ matrix.arch }} DMG
+    needs: version
     runs-on: macos-latest
     timeout-minutes: 90
     strategy:
@@ -248,6 +264,7 @@ jobs:
 
   android:
     name: Android ${{ matrix.abi }} release APK
+    needs: version
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -388,6 +405,7 @@ jobs:
 
   ios-simulator:
     name: iOS ARM64 simulator app
+    needs: version
     runs-on: macos-latest
     timeout-minutes: 90
 
