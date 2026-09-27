@@ -228,7 +228,7 @@ const TableViewer: React.FC<TableViewerProps> = ({ gridInsets, html, isDarkMode,
       {showZoomLabel && (
         <div
           aria-label={_('Zoom level')}
-          className='zoom-level-label eink-bordered not-eink:bg-black/50 not-eink:text-white pointer-events-none absolute left-1/2 top-12 -translate-x-1/2 rounded-full px-3 py-1 text-sm transition-opacity duration-300'
+          className='zoom-level-label eink-bordered not-eink:bg-black/50 not-eink:text-white pointer-events-none absolute left-1/2 top-12 -translate-x-1/2 rounded-full px-3 py-1 text-sm transition-opacity duration-200'
         >
           {Math.round((scale * 100) / 5) * 5}%
         </div>

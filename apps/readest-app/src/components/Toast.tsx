@@ -119,7 +119,7 @@ export const Toast = () => {
       <div
         data-capture-invalidating-overlay='true'
         className={clsx(
-          'toast z-[130] w-auto max-w-screen-sm transition-all duration-300',
+          'toast z-[130] w-auto max-w-screen-sm transition-all duration-200 ease-out',
           toastClassMap[toastType],
           isVisible ? 'scale-100 opacity-100' : 'scale-95 opacity-0',
         )}

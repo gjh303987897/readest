@@ -134,7 +134,7 @@ const Dialog: React.FC<DialogProps> = ({
       overlay.style.opacity = `${1 - heightFraction}`;
 
       setIsFullHeightInMobile(data.clientY < 44);
-      modal.style.transition = `padding-top 0.3s ease-out`;
+      modal.style.transition = `padding-top 0.2s ease-out`;
     }
   };
 
@@ -167,17 +167,17 @@ const Dialog: React.FC<DialogProps> = ({
       data.clientY < window.innerHeight * snapLower
     ) {
       // dialog is snapped
-      overlay.style.transition = `opacity 0.3s ease-out`;
-      overlay.style.opacity = `${1 - snapHeight}`;
+      overlay.style.transition = `opacity 0.2s ease-out`;
+      modal.style.opacity = `${1 - snapHeight}`;
       modal.style.height = `${snapHeight * 100}%`;
       modal.style.bottom = '0';
-      modal.style.transition = `transform 0.3s ease-out`;
+      modal.style.transition = `transform 0.2s ease-out`;
       modal.style.transform = '';
     } else {
       // dialog is opened without snap
       setIsFullHeightInMobile(true);
       modal.style.height = '100%';
-      modal.style.transition = `transform 0.3s ease-out`;
+      modal.style.transition = `transform 0.2s ease-out`;
       modal.style.transform = `translateY(0%)`;
       overlay.style.opacity = '0';
     }
@@ -238,7 +238,7 @@ const Dialog: React.FC<DialogProps> = ({
         <div
           className={clsx(
             'drag-handle mb-2 h-6 max-h-6 min-h-6 w-full cursor-row-resize items-center justify-center',
-            'transition-padding-top flex duration-300 ease-out sm:hidden',
+            'transition-padding-top flex duration-200 ease-out sm:hidden',
           )}
           onMouseDown={handleDragStart}
           onTouchStart={handleDragStart}

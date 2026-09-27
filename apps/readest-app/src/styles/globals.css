@@ -25,10 +25,10 @@
   background-color: transparent;
 
   --scroll-bg-color: theme('colors.base-200');
-  --safe-area-inset-top: env(safe-area-inset-top);
-  --safe-area-inset-right: env(safe-area-inset-right);
-  --safe-area-inset-bottom: env(safe-area-inset-bottom);
-  --safe-area-inset-left: env(safe-area-inset-left);
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
 }
 
 /* Fixes the scrollbar gutter issue for DaisyUI */
@@ -53,6 +53,10 @@ body {
   border-radius: 10px;
   background-color: transparent;
   cursor: default;
+  /* Improve touch scrolling performance on Android */
+  -webkit-overflow-scrolling: touch;
+  /* Prevent text selection artifacts during touch interactions */
+  -webkit-tap-highlight-color: transparent;
 }
 
 @layer utilities {
@@ -70,6 +74,13 @@ body {
   .no-spinner::-webkit-inner-spin-button {
     -webkit-appearance: none;
     margin: 0;
+  }
+
+  /* Improve touch interactions on Android */
+  .touch-optimized {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
   }
 }
 
@@ -125,6 +136,9 @@ foliate-fxl {
   @apply relative inline-flex h-8 w-9 shrink-0 items-center justify-center rounded-[5px];
   @apply transition-colors duration-150 ease-out;
   @apply focus-visible:ring-base-content/25 focus-visible:ring-2 focus-visible:ring-inset focus-visible:outline-none;
+  /* Improve touch feedback on Android */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .window-button-close {

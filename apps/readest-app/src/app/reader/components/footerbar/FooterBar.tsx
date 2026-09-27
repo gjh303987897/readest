@@ -182,7 +182,7 @@ const FooterBar: React.FC<FooterBarProps> = ({
     'footer-bar shadow-xs bottom-0 left-0 z-10 flex w-full flex-col',
     !forceMobileLayout && 'sm:h-[52px] sm:bg-base-100 sm:border-none',
     'not-eink:border-base-300/50 eink:border-base-content border-t',
-    'transition-[opacity,transform] duration-300',
+    'transition-[opacity,transform] duration-200 ease-out',
     getFooterBarPosition(forceMobileLayout || window.innerWidth < 640, isSideBarPinned),
     appService?.hasRoundedWindow && 'rounded-window-bottom-right',
     !isSideBarVisible && appService?.hasRoundedWindow && 'rounded-window-bottom-left',
@@ -194,6 +194,8 @@ const FooterBar: React.FC<FooterBarProps> = ({
       : forceMobileLayout
         ? 'pointer-events-none translate-y-full opacity-0'
         : 'pointer-events-none translate-y-full opacity-0 sm:translate-y-0',
+    // Add safe area padding for Android devices
+    appService?.isAndroidApp && 'pb-[env(safe-area-inset-bottom)]',
   );
 
   const isMobile = appService?.isMobile || window.innerWidth < 640;

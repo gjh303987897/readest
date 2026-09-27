@@ -53,9 +53,9 @@ export const useSwipeToDismiss = (
         impactFeedback('medium');
       }
     } else {
-      panel.style.transition = 'transform 0.3s ease-out';
+      panel.style.transition = 'transform 0.2s ease-out';
       panel.style.transform = 'translateY(0%)';
-      overlay.style.transition = 'opacity 0.3s ease-out';
+      overlay.style.transition = 'opacity 0.2s ease-out';
       overlay.style.opacity = '0.8';
       onDragMove?.({ clientY: 0 });
       if (appService?.hasHaptics) {
