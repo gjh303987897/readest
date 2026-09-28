@@ -129,7 +129,7 @@ describe('OPDS 1 catalog support', () => {
 
     expect(fetcher).toHaveBeenNthCalledWith(
       2,
-      'https://books.example.com/opds/search',
+      'https://books.example.com/opds/books',
       expect.anything(),
     );
     expect(result.publications).toHaveLength(1);

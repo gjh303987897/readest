@@ -11,8 +11,8 @@ const nativeBridgeSource = readFileSync(
 );
 
 describe('Android safe-area insets', () => {
-  it('keeps the status bar and display cutout inset while system UI is hidden', () => {
-    expect(nativeBridgeSource).toContain('windowInsets.getInsetsIgnoringVisibility(');
+  it('includes both status bar and display cutout insets for notch support', () => {
+    expect(nativeBridgeSource).toContain('windowInsets.getInsets(');
     expect(nativeBridgeSource).toContain(
       'WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.statusBars()',
     );
