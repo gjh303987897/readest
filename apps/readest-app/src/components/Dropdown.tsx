@@ -97,16 +97,43 @@ const Dropdown: React.FC<DropdownProps> = ({
     if (!content) return undefined;
     const clamp = () => {
       content.style.transform = '';
+      content.style.top = '';
+      content.style.bottom = '';
       const rect = content.getBoundingClientRect();
       let dx = 0;
+      let dy = 0;
+
+      // Horizontal clamping
       if (rect.right > window.innerWidth - MENU_VIEWPORT_PADDING) {
         dx = window.innerWidth - MENU_VIEWPORT_PADDING - rect.right;
       }
       if (rect.left + dx < MENU_VIEWPORT_PADDING) {
         dx = MENU_VIEWPORT_PADDING - rect.left;
       }
-      if (dx !== 0) {
-        content.style.transform = `translateX(${dx}px)`;
+
+      // Vertical clamping - check if menu extends below viewport
+      if (rect.bottom > window.innerHeight - MENU_VIEWPORT_PADDING) {
+        // Try flipping to top
+        const toggleButton = containerRef.current?.querySelector('button');
+        if (toggleButton) {
+          const buttonRect = toggleButton.getBoundingClientRect();
+          const spaceAbove = buttonRect.top - MENU_VIEWPORT_PADDING;
+          const spaceBelow = window.innerHeight - buttonRect.bottom - MENU_VIEWPORT_PADDING;
+
+          // If more space above and menu fits, flip to top
+          if (spaceAbove > spaceBelow && rect.height <= spaceAbove) {
+            content.style.top = 'auto';
+            content.style.bottom = '100%';
+            content.style.marginBottom = '0.5rem';
+          } else if (rect.bottom > window.innerHeight - MENU_VIEWPORT_PADDING) {
+            // Otherwise shift up to fit
+            dy = window.innerHeight - MENU_VIEWPORT_PADDING - rect.bottom;
+          }
+        }
+      }
+
+      if (dx !== 0 || dy !== 0) {
+        content.style.transform = `translate(${dx}px, ${dy}px)`;
       }
     };
     clamp();
@@ -117,6 +144,8 @@ const Dropdown: React.FC<DropdownProps> = ({
       window.removeEventListener('resize', clamp);
       observer?.disconnect();
       content.style.transform = '';
+      content.style.top = '';
+      content.style.bottom = '';
     };
   }, [isOpen]);
 
