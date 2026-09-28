@@ -255,29 +255,45 @@ export const loadOpdsPublications = async (
   let pageUrl = normalizeCatalogUrl(catalogUrl);
   let page = await fetchFeed(pageUrl, credentials, fetcher);
 
-  // Navigate through up to 2 levels of navigation to find books
+  // Navigate through up to 3 levels of navigation to find books
   let navigationDepth = 0;
-  while (page.publications.length === 0 && navigationDepth < 2) {
+  while (page.publications.length === 0 && navigationDepth < 3) {
+    // First try to find a common "all books" link
     const allBooks = findAllBooksLink(page.navigation);
-    const acquisitionUrl = allBooks?.url ?? page.searchUrl;
-    if (!acquisitionUrl) {
-      throw new Error(_('No acquisition feed was found in this OPDS catalog'));
+    if (allBooks) {
+      pageUrl = allBooks.url;
+      page = await fetchFeed(pageUrl, credentials, fetcher);
+      navigationDepth++;
+      continue;
     }
-    pageUrl = acquisitionUrl;
-    page = await fetchFeed(pageUrl, credentials, fetcher);
-    navigationDepth++;
 
-    // If still no publications and we have an "All" subsection, try it
-    if (page.publications.length === 0 && page.navigation.length > 0) {
-      const allSubsection = page.navigation.find(
-        (link) => link.title.trim().toLowerCase() === 'all',
-      );
-      if (allSubsection) {
-        pageUrl = allSubsection.url;
-        page = await fetchFeed(pageUrl, credentials, fetcher);
-        break;
-      }
+    // If no "all books" link, try the search URL
+    if (page.searchUrl) {
+      pageUrl = page.searchUrl;
+      page = await fetchFeed(pageUrl, credentials, fetcher);
+      navigationDepth++;
+      continue;
     }
+
+    // If we have any acquisition links, try the first one
+    const acquisitionLinks = page.navigation.filter((link) => link.acquisition);
+    if (acquisitionLinks.length > 0) {
+      pageUrl = acquisitionLinks[0]!.url;
+      page = await fetchFeed(pageUrl, credentials, fetcher);
+      navigationDepth++;
+      continue;
+    }
+
+    // Otherwise try any navigation link
+    if (page.navigation.length > 0) {
+      pageUrl = page.navigation[0]!.url;
+      page = await fetchFeed(pageUrl, credentials, fetcher);
+      navigationDepth++;
+      continue;
+    }
+
+    // No more navigation options
+    break;
   }
 
   if (page.publications.length === 0) {
