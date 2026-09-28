@@ -307,11 +307,21 @@ jobs:
 
       - name: Set up Android SDK and NDK
         run: |
+          # Set Android SDK path
           echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/28.2.13676358" >> $GITHUB_ENV
-          echo "NDK_HOME=/usr/local/lib/android/sdk/ndk/28.2.13676358" >> $GITHUB_ENV
-          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses <<< $(yes) || true
-          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --install "ndk;28.2.13676358"
+          
+          # Accept licenses
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          
+          # List available NDK versions and install the latest stable one
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --list | grep ndk || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.0.12077973"
+          
+          # Use the installed NDK
+          NDK_VERSION=$(ls /usr/local/lib/android/sdk/ndk/ | head -n 1)
+          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/$NDK_VERSION" >> $GITHUB_ENV
+          echo "NDK_HOME=/usr/local/lib/android/sdk/ndk/$NDK_VERSION" >> $GITHUB_ENV
+          echo "Installed NDK version: $NDK_VERSION"
 
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
