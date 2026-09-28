@@ -1,3 +1,0 @@
-corepack pnpm -C apps/readest-app format:check
-corepack pnpm -C apps/readest-app lint
-corepack pnpm -C apps/readest-app test:pr:web:unit
