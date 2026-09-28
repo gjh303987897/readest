@@ -20,6 +20,7 @@ import SettingsToggler from './SettingsToggler';
 import ViewMenu from './ViewMenu';
 import BookmarkButton from './BookmarkButton';
 import PiperTTSButton from './PiperTTSButton';
+import SearchButton from './headerbar/SearchButton';
 
 interface HeaderBarProps {
   bookKey: string;
@@ -202,6 +203,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
             </button>
             <BookmarkButton bookKey={bookKey} onOpenChange={setIsBookmarkDialogOpen} />
             <PiperTTSButton bookKey={bookKey} />
+            <SearchButton bookKey={bookKey} />
           </div>
         </div>
 
