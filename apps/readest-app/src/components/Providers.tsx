@@ -22,6 +22,8 @@ import { useEinkMode } from '@/hooks/useEinkMode';
 import { getLocale } from '@/utils/misc';
 import { getDirFromUILanguage } from '@/utils/rtl';
 import { getAndroidPatchedViewportContent } from '@/utils/viewport';
+import { eventDispatcher } from '@/utils/event';
+import { navigationStack } from '@/utils/navigationStack';
 
 const PrivacySyncBridge = () => {
   usePrivacySync();
@@ -95,6 +97,28 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
     const updated = getAndroidPatchedViewportContent(navigator.userAgent, meta.content);
     if (updated) meta.content = updated;
   }, []);
+
+  // Set up global back button handler for Android
+  useEffect(() => {
+    if (!appService?.isAndroidApp) return;
+
+    const handleNativeKeyDown = (event: CustomEvent) => {
+      if (event.detail.keyName === 'Back') {
+        // Try navigation stack first
+        const handled = navigationStack.handleBack();
+        if (handled) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        // If not handled, allow default behavior (app exit)
+      }
+    };
+
+    eventDispatcher.on('native-key-down', handleNativeKeyDown);
+    return () => {
+      eventDispatcher.off('native-key-down', handleNativeKeyDown);
+    };
+  }, [appService?.isAndroidApp]);
 
   if (!appService) return null;
 

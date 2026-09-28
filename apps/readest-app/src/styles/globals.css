@@ -82,6 +82,68 @@ body {
     touch-action: manipulation;
     user-select: none;
   }
+
+  /* Dialog animations */
+  .dialog-enter {
+    animation: dialogEnter 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .dialog-exit {
+    animation: dialogExit 0.2s cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  @keyframes dialogEnter {
+    from {
+      opacity: 0;
+      transform: scale(0.96) translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  @keyframes dialogExit {
+    from {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: scale(0.96) translateY(8px);
+    }
+  }
+
+  /* Mobile dialog slide-up animations */
+  .dialog-slide-enter {
+    animation: dialogSlideEnter 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .dialog-slide-exit {
+    animation: dialogSlideExit 0.25s cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  @keyframes dialogSlideEnter {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes dialogSlideExit {
+    from {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+  }
 }
 
 .full-height {

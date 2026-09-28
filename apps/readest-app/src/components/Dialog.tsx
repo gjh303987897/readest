@@ -12,6 +12,7 @@ import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { impactFeedback } from '@tauri-apps/plugin-haptics';
 import { getDirFromUILanguage } from '@/utils/rtl';
 import { eventDispatcher } from '@/utils/event';
+import { navigationStack } from '@/utils/navigationStack';
 import { Overlay } from './Overlay';
 
 const VELOCITY_THRESHOLD = 0.5;
@@ -64,14 +65,16 @@ const Dialog: React.FC<DialogProps> = ({
   const [isRtl] = useState(() => getDirFromUILanguage() === 'rtl');
   const dialogRef = useRef<HTMLDialogElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [shouldRender, setShouldRender] = useState(isOpen);
   const iconSize22 = useResponsiveSize(22);
   const isMobile = window.innerWidth < 640 || window.innerHeight < 640;
 
-  const handleKeyDown = (event: KeyboardEvent | CustomEvent) => {
+  const handleKeyDown = (event: KeyboardEvent | CustomEvent): boolean => {
     if (event instanceof CustomEvent) {
       if (event.detail.keyName === 'Back') {
-        onClose();
-        return true;
+        // Back key is now handled by navigationStack
+        return false;
       }
     } else {
       if (event.key === 'Escape') {
@@ -82,8 +85,28 @@ const Dialog: React.FC<DialogProps> = ({
     return false;
   };
 
+  // Handle open/close animations
   useEffect(() => {
-    if (!isOpen) {
+    if (isOpen) {
+      setShouldRender(true);
+      // Trigger enter animation after render
+      requestAnimationFrame(() => {
+        setIsAnimating(true);
+      });
+    } else {
+      // Trigger exit animation
+      setIsAnimating(false);
+      // Wait for animation to complete before unmounting
+      const timer = setTimeout(() => {
+        setShouldRender(false);
+      }, 250); // Match transition duration
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!shouldRender) {
       if (previousActiveElementRef.current) {
         previousActiveElementRef.current.focus();
         previousActiveElementRef.current = null;
@@ -98,8 +121,16 @@ const Dialog: React.FC<DialogProps> = ({
     if (dialogRef.current) {
       dialogRef.current.addEventListener('keydown', handleKeyDown);
     }
+
+    // Register back button handler with navigation stack
+    let unregisterNav: (() => void) | null = null;
     if (appService?.isAndroidApp) {
       acquireBackKeyInterception();
+      // Register with higher priority for dialogs
+      unregisterNav = navigationStack.push(() => {
+        onClose();
+        return true; // Consumed the back action
+      }, 100);
       eventDispatcher.onSync('native-key-down', handleKeyDown);
     }
 
@@ -108,16 +139,18 @@ const Dialog: React.FC<DialogProps> = ({
         dialogRef.current.focus();
       }
     }, 100);
+
     return () => {
       clearTimeout(timer);
       window.removeEventListener('keydown', handleKeyDown);
       if (appService?.isAndroidApp) {
         releaseBackKeyInterception();
+        unregisterNav?.();
         eventDispatcher.offSync('native-key-down', handleKeyDown);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [shouldRender]);
 
   const handleDragMove = (data: { clientY: number; deltaY: number }) => {
     if (!dismissible || !isMobile || !dialogRef.current) return;
@@ -190,14 +223,16 @@ const Dialog: React.FC<DialogProps> = ({
 
   const { handleDragStart } = useDrag(handleDragMove, handleDragKeyDown, handleDragEnd);
 
+  if (!shouldRender) return null;
+
   return (
     <dialog
       ref={dialogRef}
       id={id ?? 'dialog'}
       tabIndex={-1}
-      open={isOpen}
+      open={shouldRender}
       aria-label={title}
-      aria-hidden={!isOpen}
+      aria-hidden={!shouldRender}
       className={clsx(
         'modal sm:min-w-90 z-50 h-full w-full !items-start !bg-transparent sm:w-full sm:!items-center',
         className,
@@ -205,9 +240,10 @@ const Dialog: React.FC<DialogProps> = ({
       dir={isRtl ? 'rtl' : undefined}
     >
       <Overlay
-        captureBlocking={isOpen}
+        captureBlocking={shouldRender}
         className={clsx(
-          'dialog-overlay z-10 bg-black/50 sm:bg-black/50',
+          'dialog-overlay z-10 bg-black/50 transition-opacity duration-250 ease-out sm:bg-black/50',
+          isAnimating ? 'opacity-100' : 'opacity-0',
           appService?.hasRoundedWindow && 'rounded-window',
           bgClassName,
         )}
@@ -217,6 +253,13 @@ const Dialog: React.FC<DialogProps> = ({
         className={clsx(
           'modal-box settings-content absolute z-20 flex flex-col rounded-none rounded-tl-2xl rounded-tr-2xl p-0 sm:rounded-2xl',
           'h-full max-h-full w-full max-w-full',
+          isMobile
+            ? isAnimating
+              ? 'dialog-slide-enter'
+              : 'dialog-slide-exit'
+            : isAnimating
+              ? 'dialog-enter'
+              : 'dialog-exit',
           window.innerWidth < window.innerHeight
             ? 'sm:h-[50%] sm:w-3/4'
             : 'sm:h-[65%] sm:w-1/2 sm:max-w-[600px]',
@@ -252,7 +295,7 @@ const Dialog: React.FC<DialogProps> = ({
             <div className='flex h-11 w-full items-center justify-between'>
               <button
                 aria-label={_('Close')}
-                aria-hidden={!isOpen}
+                aria-hidden={!shouldRender}
                 onClick={onClose}
                 disabled={!dismissible}
                 className={
@@ -270,7 +313,7 @@ const Dialog: React.FC<DialogProps> = ({
               </div>
               <button
                 aria-label={_('Close')}
-                aria-hidden={!isOpen}
+                aria-hidden={!shouldRender}
                 onClick={onClose}
                 disabled={!dismissible}
                 className={
