@@ -51,7 +51,7 @@ tauri-plugin-http = { version = "2", features = ["dangerous-settings"] }
 tauri-plugin-process = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
-tauri-plugin-biometric = "2"
+tauri-plugin-biometric = "2.4"
 tauri-plugin-haptics = "2"
 tauri-plugin-persisted-scope = "2"
 tauri-plugin-native-bridge = { path = "./plugins/tauri-plugin-native-bridge" }
