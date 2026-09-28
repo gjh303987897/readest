@@ -307,6 +307,8 @@ jobs:
 
       - name: Set up Android SDK and NDK
         run: |
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           yes | sdkmanager --licenses || true
           sdkmanager --install "ndk;28.2.13676358"
 
