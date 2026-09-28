@@ -180,20 +180,25 @@ const LibraryPage = () => {
     }
   };
 
-  const importOpdsFile = async (file: File): Promise<boolean> => {
-    if (!appService) return false;
-    try {
-      const book = await ingestFile(
-        { file, books: useLibraryStore.getState().library },
-        { appService, settings, isLoggedIn: !!user },
-      );
-      if (!book) return false;
-      await updateBook(envConfig, book);
-      return true;
-    } catch (error) {
-      console.error('Failed to import OPDS book', error);
-      return false;
+  const importOpdsFiles = async (files: File[]): Promise<number> => {
+    if (!appService || files.length === 0) return 0;
+    const imported: Book[] = [];
+    for (const file of files) {
+      try {
+        const book = await ingestFile(
+          { file, books: [...useLibraryStore.getState().library, ...imported] },
+          { appService, settings, isLoggedIn: !!user },
+        );
+        if (book) imported.push(book);
+      } catch (error) {
+        console.error('Failed to import OPDS book', error);
+      }
     }
+
+    if (imported.length > 0) {
+      await updateBooks(envConfig, imported);
+    }
+    return imported.length;
   };
 
   useEffect(() => {
@@ -590,7 +595,7 @@ const LibraryPage = () => {
       <OpdsDialog
         isOpen={isOpdsDialogOpen}
         onClose={() => setOpdsDialogOpen(false)}
-        onImportFile={importOpdsFile}
+        onImportFiles={importOpdsFiles}
       />
       <PrivacyUnlockDialog isOpen={isUnlockDialogOpen} onClose={() => setUnlockDialogOpen(false)} />
       <Toast />

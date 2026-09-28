@@ -16,10 +16,10 @@ import { eventDispatcher } from '@/utils/event';
 interface OpdsDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onImportFile: (file: File) => Promise<boolean>;
+  onImportFiles: (files: File[]) => Promise<number>;
 }
 
-const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFile }) => {
+const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles }) => {
   const _ = useTranslation();
   const [catalogUrl, setCatalogUrl] = useState('');
   const [username, setUsername] = useState('');
@@ -90,18 +90,20 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFile }
     setDownloading(true);
     setError('');
     setDownloadProgress({ current: 0, total: selectedPublications.length });
-    let imported = 0;
+    const downloadedFiles: File[] = [];
 
     for (let index = 0; index < selectedPublications.length; index += 1) {
       const publication = selectedPublications[index]!;
       setDownloadProgress({ current: index + 1, total: selectedPublications.length });
       try {
         const file = await downloadOpdsPublication(publication, credentials);
-        if (await onImportFile(file)) imported += 1;
+        downloadedFiles.push(file);
       } catch (downloadError) {
-        console.error('Failed to import OPDS publication', downloadError);
+        console.error('Failed to download OPDS publication', downloadError);
       }
     }
+
+    const imported = await onImportFiles(downloadedFiles);
 
     setDownloading(false);
     if (imported > 0) {
@@ -111,10 +113,10 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFile }
       });
       setSelected(new Set());
     }
-    if (imported !== selectedPublications.length) {
+    if (imported !== downloadedFiles.length) {
       setError(
         _('{{count}} book(s) could not be imported', {
-          count: selectedPublications.length - imported,
+          count: downloadedFiles.length - imported,
         }),
       );
     }

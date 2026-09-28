@@ -65,8 +65,8 @@ beforeEach(() => {
 
 describe('OPDS catalog dialog', () => {
   it('loads the catalog and imports every selected publication', async () => {
-    const onImportFile = vi.fn(async () => true);
-    render(<OpdsDialog isOpen onClose={() => {}} onImportFile={onImportFile} />);
+    const onImportFiles = vi.fn(async (files: File[]) => files.length);
+    render(<OpdsDialog isOpen onClose={() => {}} onImportFiles={onImportFiles} />);
 
     fireEvent.change(screen.getByLabelText('Catalog URL'), {
       target: { value: 'https://books.example.com/opds' },
@@ -79,7 +79,10 @@ describe('OPDS catalog dialog', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select all books' }));
     fireEvent.click(screen.getByRole('button', { name: 'Download selected' }));
 
-    await waitFor(() => expect(onImportFile).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(onImportFiles).toHaveBeenCalledTimes(1));
+    expect(onImportFiles).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.any(File), expect.any(File)]),
+    );
     expect(downloadOpdsPublication).toHaveBeenCalledTimes(2);
   });
 });
