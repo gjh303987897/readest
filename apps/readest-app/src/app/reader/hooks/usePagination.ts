@@ -396,18 +396,22 @@ export const usePagination = (
   }, []);
 
   // Volume-key page-flip interception (mobile only).
+  // Subscribe to volumeKeysToFlip from the store so changes trigger re-evaluation.
+  const volumeKeysToFlip = useSettingsStore((s) => {
+    const viewSettings = s.getViewSettings?.(bookKey) || s.settings.globalViewSettings;
+    return viewSettings.volumeKeysToFlip;
+  });
+
   useEffect(() => {
     if (!appService?.isMobileApp) return;
-
-    const viewSettings = getViewSettings(bookKey);
-    if (!viewSettings?.volumeKeysToFlip) return;
+    if (!volumeKeysToFlip) return;
 
     acquireVolumeKeyInterception();
     return () => {
       releaseVolumeKeyInterception();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookKey]);
+  }, [bookKey, volumeKeysToFlip]);
 
   // Hardware page turner: native-key + DOM-key listeners and native
   // media-key interception, re-evaluated whenever the setting changes.
