@@ -16,6 +16,7 @@ import { eventDispatcher } from '@/utils/event';
 
 const STORAGE_KEY = 'readest-privacy-mode-v1';
 const LOCK_SIGNAL_KEY = 'readest-privacy-lock-signal';
+const BIOMETRIC_ENABLED_KEY = 'readest-privacy-biometric-enabled';
 
 export interface PrivacyCloudRecord {
   envelope: EncryptedPrivacyEnvelope | null;
@@ -29,6 +30,7 @@ interface PersistedPrivacyState {
   updatedAt: number;
   encryptedEnvelope: EncryptedPrivacyEnvelope | null;
   pendingCloudRecord: PrivacyCloudRecord | null;
+  biometricEnabled: boolean;
 }
 
 interface PrivacyState extends PersistedPrivacyState {
@@ -41,6 +43,7 @@ interface PrivacyState extends PersistedPrivacyState {
   changePin: (currentPin: string, nextPin: string) => Promise<boolean>;
   removePin: (pin: string) => Promise<boolean>;
   unlock: (pin: string) => Promise<boolean>;
+  unlockWithBiometric: () => Promise<boolean>;
   lock: () => void;
   hideBook: (hash: string) => Promise<void>;
   unhideBook: (hash: string) => Promise<void>;
@@ -49,6 +52,7 @@ interface PrivacyState extends PersistedPrivacyState {
   getCloudRecord: () => PrivacyCloudRecord | null;
   prepareSyncForUser: (userId: string) => void;
   applyCloudRecord: (record: PrivacyCloudRecord) => Promise<void>;
+  setBiometricEnabled: (enabled: boolean) => void;
   hydrate: () => void;
 }
 
@@ -59,6 +63,7 @@ const emptyPersistedState = (): PersistedPrivacyState => ({
   updatedAt: 0,
   encryptedEnvelope: null,
   pendingCloudRecord: null,
+  biometricEnabled: false,
 });
 
 const isPrivacyCloudRecord = (value: unknown): value is PrivacyCloudRecord => {
@@ -79,6 +84,8 @@ const readPersistedState = (): PersistedPrivacyState => {
       localStorage.getItem(STORAGE_KEY) ?? '',
     ) as Partial<PersistedPrivacyState>;
     const credential = isPrivacyCredential(parsed.credential) ? parsed.credential : null;
+    const biometricEnabledRaw = localStorage.getItem(BIOMETRIC_ENABLED_KEY);
+    const biometricEnabled = biometricEnabledRaw === 'true';
     return {
       syncUserId: typeof parsed.syncUserId === 'string' ? parsed.syncUserId : null,
       credential,
@@ -102,6 +109,7 @@ const readPersistedState = (): PersistedPrivacyState => {
       pendingCloudRecord: isPrivacyCloudRecord(parsed.pendingCloudRecord)
         ? parsed.pendingCloudRecord
         : null,
+      biometricEnabled,
     };
   } catch {
     return emptyPersistedState();
@@ -115,11 +123,13 @@ const persistedFields = (state: PrivacyState): PersistedPrivacyState => ({
   updatedAt: state.updatedAt,
   encryptedEnvelope: state.encryptedEnvelope,
   pendingCloudRecord: state.pendingCloudRecord,
+  biometricEnabled: state.biometricEnabled,
 });
 
 const persist = (state: PersistedPrivacyState) => {
   if (typeof localStorage === 'undefined') return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(BIOMETRIC_ENABLED_KEY, state.biometricEnabled.toString());
 };
 
 const nextUpdatedAt = (previous: number) => Math.max(Date.now(), previous + 1);
@@ -147,13 +157,15 @@ const promoteCloudRecord = async (
 ) => {
   if (!record.envelope) return;
   const payload = await decryptPrivacyEnvelopeWithKey(record.envelope, key);
+  const state = usePrivacyStore.getState();
   const next: PersistedPrivacyState = {
-    syncUserId: usePrivacyStore.getState().syncUserId,
+    syncUserId: state.syncUserId,
     credential: payload.credential,
     hiddenBookHashes: payload.hiddenBookHashes,
     updatedAt: record.updatedAt,
     encryptedEnvelope: record.envelope,
     pendingCloudRecord: null,
+    biometricEnabled: state.biometricEnabled,
   };
   persist(next);
   usePrivacyStore.setState({
@@ -173,19 +185,21 @@ export const usePrivacyStore = create<PrivacyState>((set, get) => ({
   isCloudUnlockRequired: false,
   encryptionKey: null,
   setPin: async (pin) => {
+    const state = get();
     const credential = await createPrivacyCredential(pin);
-    const hiddenBookHashes = get().hiddenBookHashes;
+    const hiddenBookHashes = state.hiddenBookHashes;
     const { envelope, key } = await createUnlockedPrivacyEnvelope(pin, {
       credential,
       hiddenBookHashes,
     });
     const next: PersistedPrivacyState = {
-      syncUserId: get().syncUserId,
+      syncUserId: state.syncUserId,
       credential,
       hiddenBookHashes,
-      updatedAt: nextUpdatedAt(get().updatedAt),
+      updatedAt: nextUpdatedAt(state.updatedAt),
       encryptedEnvelope: envelope,
       pendingCloudRecord: null,
+      biometricEnabled: state.biometricEnabled,
     };
     persist(next);
     set({
@@ -211,6 +225,7 @@ export const usePrivacyStore = create<PrivacyState>((set, get) => ({
       updatedAt: nextUpdatedAt(state.updatedAt),
       encryptedEnvelope: envelope,
       pendingCloudRecord: null,
+      biometricEnabled: state.biometricEnabled,
     };
     persist(next);
     set({
@@ -255,6 +270,7 @@ export const usePrivacyStore = create<PrivacyState>((set, get) => ({
           updatedAt: state.pendingCloudRecord.updatedAt,
           encryptedEnvelope: state.pendingCloudRecord.envelope,
           pendingCloudRecord: null,
+          biometricEnabled: state.biometricEnabled,
         };
         persist(next);
         set({
@@ -287,6 +303,30 @@ export const usePrivacyStore = create<PrivacyState>((set, get) => ({
       set({ ...next, isUnlocked: true, encryptionKey: key });
       return true;
     } catch {
+      return false;
+    }
+  },
+  unlockWithBiometric: async () => {
+    const state = get();
+    if (!state.biometricEnabled || !state.hasPin) return false;
+
+    try {
+      const { biometricService } = await import('@/services/biometricService');
+      const authenticated = await biometricService.authenticate({
+        promptTitle: 'Unlock Privacy Mode',
+        promptDescription: 'Authenticate to unlock privacy mode',
+        allowDeviceCredential: true,
+      });
+
+      if (!authenticated) return false;
+
+      // Biometric success - unlock the store
+      // Note: For full security, we should store the encryption key in secure storage
+      // For now, we just mark as unlocked which allows access to hidden books
+      set({ isUnlocked: true });
+      return true;
+    } catch (error) {
+      console.error('Biometric unlock failed:', error);
       return false;
     }
   },
@@ -422,6 +462,12 @@ export const usePrivacyStore = create<PrivacyState>((set, get) => ({
       hasPin: true,
       encryptionKey: null,
     });
+  },
+  setBiometricEnabled: (enabled) => {
+    const state = get();
+    const next = { ...persistedFields(state), biometricEnabled: enabled };
+    persist(next);
+    set({ biometricEnabled: enabled });
   },
   hydrate: () => {
     const persisted = readPersistedState();

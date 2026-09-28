@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Lock, ShieldCheck, Trash2 } from 'lucide-react';
+import { Fingerprint, Lock, ShieldCheck, Trash2 } from 'lucide-react';
 
 import { useTranslation } from '@/hooks/useTranslation';
 import { isValidPrivacyPin } from '@/services/privacyService';
@@ -14,22 +14,40 @@ const PrivacyPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => 
     isUnlocked,
     isCloudUnlockRequired,
     hiddenBookHashes,
+    biometricEnabled,
     setPin,
     changePin,
     removePin,
     unlock,
+    unlockWithBiometric,
     lock,
+    setBiometricEnabled,
   } = usePrivacyStore();
   const [currentPin, setCurrentPin] = useState('');
   const [nextPin, setNextPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
 
   useEffect(() => {
     onRegisterReset(() => {});
     // Register once when the panel mounts; the parent callback is recreated on each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    // Check if biometric is available
+    const checkBiometric = async () => {
+      try {
+        const { biometricService } = await import('@/services/biometricService');
+        const available = await biometricService.isAvailable();
+        setBiometricAvailable(available);
+      } catch {
+        setBiometricAvailable(false);
+      }
+    };
+    void checkBiometric();
   }, []);
 
   const clearFields = () => {
@@ -73,6 +91,11 @@ const PrivacyPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => 
     setBusy(false);
     setStatus(accepted ? _('Privacy mode unlocked') : _('Incorrect PIN'));
     if (accepted) setCurrentPin('');
+  };
+
+  const toggleBiometric = () => {
+    setBiometricEnabled(!biometricEnabled);
+    setStatus(!biometricEnabled ? _('Biometric unlock enabled') : _('Biometric unlock disabled'));
   };
 
   const pinInput = (value: string, setter: (value: string) => void, label: string) => (
@@ -122,17 +145,39 @@ const PrivacyPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => 
           </SettingsRow>
         )}
         {hasPin && !isUnlocked && (
-          <SettingsRow label={_('Unlock Privacy Mode')}>
-            <button
-              type='button'
-              className='btn btn-contrast btn-sm'
-              disabled={busy || currentPin.length < 4}
-              onClick={() => void unlockPrivacyMode()}
-            >
-              <ShieldCheck className='h-4 w-4' />
-              {_('Unlock')}
-            </button>
-          </SettingsRow>
+          <>
+            <SettingsRow label={_('Unlock Privacy Mode')}>
+              <button
+                type='button'
+                className='btn btn-contrast btn-sm'
+                disabled={busy || currentPin.length < 4}
+                onClick={() => void unlockPrivacyMode()}
+              >
+                <ShieldCheck className='h-4 w-4' />
+                {_('Unlock')}
+              </button>
+            </SettingsRow>
+            {biometricAvailable && biometricEnabled && (
+              <SettingsRow label={_('Unlock with Biometric')}>
+                <button
+                  type='button'
+                  className='btn btn-contrast btn-sm'
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    const success = await unlockWithBiometric();
+                    setBusy(false);
+                    setStatus(
+                      success ? _('Privacy mode unlocked') : _('Biometric authentication failed'),
+                    );
+                  }}
+                >
+                  <Fingerprint className='h-4 w-4' />
+                  {_('Unlock')}
+                </button>
+              </SettingsRow>
+            )}
+          </>
         )}
         {!isCloudUnlockRequired && (
           <>
@@ -161,6 +206,25 @@ const PrivacyPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => 
               <Lock className='h-4 w-4' />
               {_('Lock')}
             </button>
+          </SettingsRow>
+        )}
+        {hasPin && biometricAvailable && (
+          <SettingsRow
+            label={_('Biometric Unlock')}
+            description={_('Use fingerprint or face recognition to unlock privacy mode')}
+          >
+            <label className='swap swap-flip'>
+              <input
+                type='checkbox'
+                checked={biometricEnabled}
+                onChange={toggleBiometric}
+                aria-label={_('Toggle biometric unlock')}
+              />
+              <Fingerprint
+                className={`swap-on h-5 w-5 ${biometricEnabled ? 'text-success' : ''}`}
+              />
+              <Fingerprint className='swap-off h-5 w-5 opacity-40' />
+            </label>
           </SettingsRow>
         )}
         {hasPin && !isCloudUnlockRequired && (

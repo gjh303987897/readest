@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { LockKeyhole } from 'lucide-react';
+import { Fingerprint, LockKeyhole } from 'lucide-react';
 
 import Dialog from '@/components/Dialog';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -18,6 +18,8 @@ const PrivacyUnlockDialog: React.FC<PrivacyUnlockDialogProps> = ({
 }) => {
   const _ = useTranslation();
   const unlock = usePrivacyStore((state) => state.unlock);
+  const unlockWithBiometric = usePrivacyStore((state) => state.unlockWithBiometric);
+  const biometricEnabled = usePrivacyStore((state) => state.biometricEnabled);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -44,6 +46,24 @@ const PrivacyUnlockDialog: React.FC<PrivacyUnlockDialogProps> = ({
     }
     onUnlocked?.();
     onClose();
+  };
+
+  const handleBiometricUnlock = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const accepted = await unlockWithBiometric();
+      setBusy(false);
+      if (!accepted) {
+        setError(_('Biometric authentication failed'));
+        return;
+      }
+      onUnlocked?.();
+      onClose();
+    } catch (_error) {
+      setBusy(false);
+      setError(_('Biometric authentication failed'));
+    }
   };
 
   return (
@@ -78,6 +98,17 @@ const PrivacyUnlockDialog: React.FC<PrivacyUnlockDialogProps> = ({
         />
         {error && <p className='text-error text-center text-sm'>{error}</p>}
         <div className='flex justify-end gap-2'>
+          {biometricEnabled && (
+            <button
+              type='button'
+              className='btn btn-ghost eink-bordered'
+              disabled={busy}
+              onClick={() => void handleBiometricUnlock()}
+            >
+              <Fingerprint className='h-4 w-4' />
+              {_('Biometric')}
+            </button>
+          )}
           <button type='button' className='btn btn-ghost eink-bordered' onClick={onClose}>
             {_('Cancel')}
           </button>
