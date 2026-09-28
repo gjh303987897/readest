@@ -474,7 +474,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
             e.stopPropagation();
             handlePreviousImage();
           }}
-          className='eink-bordered absolute left-4 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-black/50 text-white transition-all duration-300 hover:bg-black/70'
+          className='eink-bordered absolute left-4 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-black/50 text-white transition-all duration-200 ease-out hover:bg-black/70'
           aria-label={_('Previous Image')}
           title={_('Previous Image')}
         >
@@ -488,7 +488,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
             e.stopPropagation();
             handleNextImage();
           }}
-          className='eink-bordered absolute right-4 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-black/50 text-white transition-all duration-300 hover:bg-black/70'
+          className='eink-bordered absolute right-4 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-black/50 text-white transition-all duration-200 ease-out hover:bg-black/70'
           aria-label={_('Next Image')}
           title={_('Next Image')}
         >
@@ -539,7 +539,7 @@ const ImageViewer: React.FC<ImageViewerProps> = ({
       {showZoomLabel && (
         <div
           aria-label={_('Zoom level')}
-          className='zoom-level-label eink-bordered not-eink:text-white not-eink:bg-black/50 pointer-events-none absolute left-1/2 top-12 -translate-x-1/2 rounded-full px-3 py-1 text-sm transition-opacity duration-300'
+          className='zoom-level-label eink-bordered not-eink:text-white not-eink:bg-black/50 pointer-events-none absolute left-1/2 top-12 -translate-x-1/2 rounded-full px-3 py-1 text-sm transition-opacity duration-200'
         >
           {zoomPercent}%
         </div>

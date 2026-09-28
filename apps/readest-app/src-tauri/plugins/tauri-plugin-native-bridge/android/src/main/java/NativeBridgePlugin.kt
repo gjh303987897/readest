@@ -578,8 +578,11 @@ class NativeBridgePlugin(private val activity: Activity): Plugin(activity) {
             val windowInsets = androidx.core.view.ViewCompat.getRootWindowInsets(rootView)
 
             if (windowInsets != null) {
+                // Edge-to-edge windows can overlap the transparent status bar. On
+                // devices with a waterdrop cutout, the top safe area is reported
+                // through statusBars() while displayCutout() may remain zero.
                 val insets = windowInsets.getInsets(
-                    WindowInsetsCompat.Type.displayCutout()
+                    WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.statusBars()
                 )
                 val density = activity.resources.displayMetrics.density
                 ret.put("top", insets.top / density)

@@ -143,6 +143,7 @@ const MenuItem: React.FC<MenuItemProps> = ({
         tabIndex={disabled ? -1 : 0}
         className={clsx(
           'hover:bg-base-300 text-base-content flex w-full flex-col items-center justify-center rounded-md p-1 py-[10px]',
+          'touch-optimized transition-colors duration-150 ease-out',
           disabled && 'btn-disabled text-gray-400',
           buttonClass,
         )}

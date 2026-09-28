@@ -90,7 +90,7 @@ const ContentNavBar: React.FC<ContentNavBarProps> = ({
           <div className='bg-base-100 relative flex flex-1 items-center justify-between overflow-hidden rounded-xl px-2 py-1 shadow-lg sm:gap-6'>
             {progress !== undefined && progress < 1 && (
               <div
-                className='bg-base-200 absolute inset-y-0 left-0 transition-all duration-300'
+                className='bg-base-200 absolute inset-y-0 left-0 transition-all duration-200 ease-out'
                 style={{ width: `${progress * 100}%` }}
               />
             )}

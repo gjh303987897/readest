@@ -4340,8 +4340,7 @@ dependencies = [
 [[package]]
 name = "parking_lot_core"
 version = "0.9.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
+source = "git+https://github.com/Amanieu/parking_lot.git?rev=9a125c868809b2eaf894a9638997002ec4078893#9a125c868809b2eaf894a9638997002ec4078893"
 dependencies = [
  "cfg-if",
  "libc",
@@ -9041,3 +9040,8 @@ dependencies = [
  "syn 2.0.119",
  "winnow 1.0.4",
 ]
+
+[[patch.unused]]
+name = "libloading"
+version = "0.9.0"
+source = "git+https://github.com/nagisa/rust_libloading.git?rev=f5dc3b81485b978596d518f7574d941ff811bf74#f5dc3b81485b978596d518f7574d941ff811bf74"

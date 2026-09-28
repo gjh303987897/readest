@@ -1,0 +1,5 @@
+[target.aarch64-linux-android]
+linker = "aarch64-linux-android26-clang"
+
+[build]
+target = "aarch64-linux-android"

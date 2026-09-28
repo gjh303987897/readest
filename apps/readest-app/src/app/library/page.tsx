@@ -34,12 +34,14 @@ import { useAppRouter } from '@/hooks/useAppRouter';
 import { useLibraryStore } from '@/store/libraryStore';
 import { useBookDataStore } from '@/store/bookDataStore';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useThemeStore } from '@/store/themeStore';
 import { useTransferStore } from '@/store/transferStore';
 import { ingestFile } from '@/services/ingestService';
 import { eventDispatcher } from '@/utils/event';
 import { formatAuthors } from '@/utils/book';
 import { navigateToLogin, navigateToReader } from '@/utils/nav';
 import { parseOpenWithFiles } from '@/helpers/openWith';
+import { getPanelTopInset } from '@/utils/insets';
 import BookCover from '@/components/BookCover';
 import Spinner from '@/components/Spinner';
 import { Toast } from '@/components/Toast';
@@ -83,6 +85,16 @@ const LibraryPage = () => {
   const [isOpdsDialogOpen, setOpdsDialogOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const showWindowControls = !!appService?.hasWindowBar && !appService.hasTrafficLight;
+  const { safeAreaInsets, systemUIVisible, statusBarHeight } = useThemeStore();
+  const topInset = appService?.hasSafeAreaInset
+    ? getPanelTopInset({
+        isMobile: false,
+        isFullHeightInMobile: false,
+        systemUIVisible,
+        statusBarHeight,
+        safeAreaInsets,
+      })
+    : 0;
 
   useTheme({ systemUIVisible: true, appThemeColor: 'base-100' });
   useTransferQueue(libraryLoaded);
@@ -303,6 +315,7 @@ const LibraryPage = () => {
           'border-base-300 relative flex min-h-16 shrink-0 select-none items-center gap-3 border-b ps-4 sm:ps-6',
           showWindowControls ? 'pe-36 sm:pe-40' : 'pe-4 sm:pe-6',
         )}
+        style={{ marginTop: `${topInset}px` }}
       >
         <div className='flex min-w-0 shrink-0 items-center gap-2'>
           <BookOpen aria-hidden='true' className='h-5 w-5 shrink-0' />
