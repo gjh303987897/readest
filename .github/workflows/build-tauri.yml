@@ -307,10 +307,11 @@ jobs:
 
       - name: Set up Android SDK and NDK
         run: |
-          export ANDROID_HOME=/usr/local/lib/android/sdk
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          yes | sdkmanager --licenses || true
-          sdkmanager --install "ndk;28.2.13676358"
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=/usr/local/lib/android/sdk/ndk/28.2.13676358" >> $GITHUB_ENV
+          echo "NDK_HOME=/usr/local/lib/android/sdk/ndk/28.2.13676358" >> $GITHUB_ENV
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses <<< $(yes) || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --install "ndk;28.2.13676358"
 
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
@@ -332,12 +333,10 @@ jobs:
       - name: Build optimized release APK
         working-directory: apps/readest-app
         env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
           CARGO_PROFILE_RELEASE_DEBUG: "0"
           CARGO_PROFILE_RELEASE_LTO: thin
           CARGO_PROFILE_RELEASE_STRIP: symbols
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
           NODE_OPTIONS: --max-old-space-size=8192
         run: |
           rm -rf src-tauri/gen/android
