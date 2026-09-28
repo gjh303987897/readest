@@ -236,8 +236,10 @@ const fetchFeed = async (
 
 const findAllBooksLink = (navigation: OpdsNavigationLink[]): OpdsNavigationLink | undefined => {
   const allBooksPattern = /^all( books| publications| titles)?$/i;
+  const alphabeticalPattern = /^alphabetical( books| publications| titles)?$/i;
   return (
     navigation.find((link) => allBooksPattern.test(link.title.trim())) ??
+    navigation.find((link) => alphabeticalPattern.test(link.title.trim())) ??
     navigation.find((link) => /\/category\/0(?:\/|$|\?)/.test(link.url)) ??
     (navigation.filter((link) => link.acquisition).length === 1
       ? navigation.find((link) => link.acquisition)
@@ -253,7 +255,9 @@ export const loadOpdsPublications = async (
   let pageUrl = normalizeCatalogUrl(catalogUrl);
   let page = await fetchFeed(pageUrl, credentials, fetcher);
 
-  if (page.publications.length === 0) {
+  // Navigate through up to 2 levels of navigation to find books
+  let navigationDepth = 0;
+  while (page.publications.length === 0 && navigationDepth < 2) {
     const allBooks = findAllBooksLink(page.navigation);
     const acquisitionUrl = allBooks?.url ?? page.searchUrl;
     if (!acquisitionUrl) {
@@ -261,6 +265,23 @@ export const loadOpdsPublications = async (
     }
     pageUrl = acquisitionUrl;
     page = await fetchFeed(pageUrl, credentials, fetcher);
+    navigationDepth++;
+
+    // If still no publications and we have an "All" subsection, try it
+    if (page.publications.length === 0 && page.navigation.length > 0) {
+      const allSubsection = page.navigation.find(
+        (link) => link.title.trim().toLowerCase() === 'all',
+      );
+      if (allSubsection) {
+        pageUrl = allSubsection.url;
+        page = await fetchFeed(pageUrl, credentials, fetcher);
+        break;
+      }
+    }
+  }
+
+  if (page.publications.length === 0) {
+    throw new Error(_('No books were found in this OPDS catalog'));
   }
 
   const title = page.title;
