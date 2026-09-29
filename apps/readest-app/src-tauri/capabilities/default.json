@@ -128,6 +128,7 @@
     "process:allow-exit",
     "process:allow-restart",
     "opener:default",
+    "biometric:default",
     "haptics:allow-vibrate",
     "haptics:allow-impact-feedback",
     "haptics:allow-notification-feedback",

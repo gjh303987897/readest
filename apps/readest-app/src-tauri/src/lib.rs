@@ -267,11 +267,16 @@ pub fn run() {
         .plugin(tauri_plugin_device_info::init())
         .plugin(tauri_plugin_turso::init())
         .plugin(tauri_plugin_native_bridge::init())
-        .plugin(tauri_plugin_biometric::init())
         // Serves local file byte-ranges to `RemoteFile` via `?path=&start=&end=`
         // (range-in-URL, not a `Range` header) so Android's WebView doesn't
         // re-apply the offset. Scope-gated by `asset_protocol_scope`.
         .register_asynchronous_uri_scheme_protocol(range_file::SCHEME, range_file::handle);
+
+    // tauri-plugin-biometric is `#![cfg(mobile)]`: on desktop the crate is empty and
+    // `init()` does not exist. The frontend's checkStatus() then rejects and the
+    // privacy panel hides biometric unlock, so desktop falls back to the PIN.
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_biometric::init());
 
     #[cfg(desktop)]
     let builder = builder.plugin(
