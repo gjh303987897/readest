@@ -25,7 +25,7 @@ vi.mock('@/hooks/useTranslation', () => ({
 }));
 
 vi.mock('@/i18n/i18n', () => ({
-  SUPPORTED_LNGS: ['en', 'zh-CN'],
+  SUPPORTED_LNGS: ['en', 'sv', 'zh-CN', 'zh-TW'],
 }));
 
 vi.mock('@/store/settingsStore', () => ({
@@ -54,6 +54,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('GeneralPanel', () => {
+  it('shows Chinese variants by their familiar native names', () => {
+    render(<GeneralPanel bookKey='' onRegisterReset={h.onRegisterReset} />);
+
+    expect((screen.getByRole('option', { name: '简体中文' }) as HTMLOptionElement).value).toBe(
+      'zh-CN',
+    );
+    expect((screen.getByRole('option', { name: '正體中文' }) as HTMLOptionElement).value).toBe(
+      'zh-TW',
+    );
+    expect((screen.getByRole('option', { name: 'Svenska' }) as HTMLOptionElement).value).toBe('sv');
+  });
+
   it('applies and persists the selected interface language', () => {
     render(<GeneralPanel bookKey='' onRegisterReset={h.onRegisterReset} />);
 

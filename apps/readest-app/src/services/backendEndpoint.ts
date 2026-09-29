@@ -9,6 +9,23 @@ export interface BackendConnection {
   apiBaseUrl: string;
 }
 
+export type BackendEndpointErrorCode =
+  | 'invalidUrl'
+  | 'invalidProtocol'
+  | 'connectionFailed'
+  | 'invalidConfiguration';
+
+export class BackendEndpointError extends Error {
+  constructor(
+    public readonly code: BackendEndpointErrorCode,
+    message: string,
+    public readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'BackendEndpointError';
+  }
+}
+
 const isBackendConnection = (value: unknown): value is BackendConnection => {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<BackendConnection>;
@@ -21,9 +38,14 @@ const isBackendConnection = (value: unknown): value is BackendConnection => {
 };
 
 export const normalizeBackendEndpoint = (value: string): string => {
-  const url = new URL(value.trim());
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new BackendEndpointError('invalidUrl', 'Invalid server endpoint URL');
+  }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Endpoint must use HTTP or HTTPS');
+    throw new BackendEndpointError('invalidProtocol', 'Endpoint must use HTTP or HTTPS');
   }
   return url.origin;
 };
@@ -54,12 +76,19 @@ export const connectBackendEndpoint = async (
     headers: { Accept: 'application/json' },
   });
   if (!response.ok) {
-    throw new Error(`Unable to connect to endpoint (${response.status})`);
+    throw new BackendEndpointError(
+      'connectionFailed',
+      `Unable to connect to endpoint (${response.status})`,
+      response.status,
+    );
   }
 
   const config = (await response.json()) as ReadestRuntimeConfig;
   if (!config.supabaseUrl || !config.supabaseAnonKey) {
-    throw new Error('Endpoint returned invalid runtime configuration');
+    throw new BackendEndpointError(
+      'invalidConfiguration',
+      'Endpoint returned invalid runtime configuration',
+    );
   }
 
   const connection: BackendConnection = {

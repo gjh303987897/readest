@@ -34,7 +34,7 @@ const SettingsSelect: React.FC<SettingsSelectProps> = ({
   ariaLabel,
 }) => {
   return (
-    <div className='flex max-w-[60%] items-center rounded-md focus-within:bg-transparent hover:bg-transparent'>
+    <div className='hover:bg-base-200/60 focus-within:bg-base-200/60 flex max-w-[60%] items-center rounded-md transition-colors duration-150'>
       <select
         value={value}
         onChange={onChange}

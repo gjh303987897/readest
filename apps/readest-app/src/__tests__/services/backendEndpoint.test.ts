@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BACKEND_CONNECTION_STORAGE_KEY,
+  BackendEndpointError,
   connectBackendEndpoint,
   getStoredBackendConnection,
   normalizeBackendEndpoint,
@@ -57,5 +58,18 @@ describe('backend endpoint configuration', () => {
       'invalid runtime configuration',
     );
     expect(getStoredBackendConnection()).toBeNull();
+  });
+
+  it('provides error codes and status for localized UI messages', async () => {
+    expect(() => normalizeBackendEndpoint('ftp://reader.example.com')).toThrowError(
+      expect.objectContaining({ code: 'invalidProtocol' }),
+    );
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 503 }));
+    await expect(
+      connectBackendEndpoint('https://reader.example.com', fetcher),
+    ).rejects.toMatchObject({
+      code: 'connectionFailed',
+      status: 503,
+    } satisfies Partial<BackendEndpointError>);
   });
 });

@@ -1,11 +1,13 @@
 import clsx from 'clsx';
 import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from '@/hooks/useTranslation';
 import { useThemeStore } from '@/store/themeStore';
 import { eventDispatcher } from '@/utils/event';
 
 export type ToastType = 'info' | 'success' | 'warning' | 'error';
 
 export const Toast = () => {
+  const _ = useTranslation();
   const { safeAreaInsets } = useThemeStore();
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<ToastType>('info');
@@ -170,7 +172,7 @@ export const Toast = () => {
                 ? 'hover:bg-base-300 hidden'
                 : 'hover:bg-white/20 active:bg-white/30',
             )}
-            aria-label='Dismiss'
+            aria-label={_('Dismiss')}
           >
             <svg className='h-4 w-4' fill='currentColor' viewBox='0 0 20 20'>
               <path

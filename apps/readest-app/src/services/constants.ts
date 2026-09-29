@@ -663,6 +663,7 @@ export const TRANSLATED_LANGS = {
   uk: 'Українська',
   pl: 'Polski',
   sl: 'Slovenščina',
+  sv: 'Svenska',
   tr: 'Türkçe',
   hi: 'हिन्दी',
   id: 'Indonesia',

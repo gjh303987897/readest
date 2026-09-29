@@ -6,6 +6,26 @@ import { initReactI18next } from 'react-i18next';
 // 'en' is the source language and not listed in the translatable set.
 export const SUPPORTED_LNGS = ['en', ...translatableLngs];
 
+const fallbackLanguages: Record<string, string[]> = {
+  'pt-BR': ['pt', 'en'],
+  kk: ['ru', 'en'],
+  ky: ['ru', 'en'],
+  tk: ['ru', 'en'],
+  ug: ['ru', 'en'],
+  tt: ['ru', 'en'],
+};
+
+export const getFallbackLanguages = (language?: string): string[] => {
+  const parts = language?.toLowerCase().split('-') ?? [];
+  if (parts[0] === 'zh') {
+    const traditional =
+      parts.includes('hant') ||
+      (!parts.includes('hans') && parts.some((part) => ['tw', 'hk', 'mo'].includes(part)));
+    return [traditional ? 'zh-TW' : 'zh-CN', 'en'];
+  }
+  return fallbackLanguages[language ?? ''] ?? ['en'];
+};
+
 const isBrowser = typeof window !== 'undefined';
 
 const initI18n = async () => {
@@ -19,16 +39,7 @@ const initI18n = async () => {
     .use(initReactI18next)
     .init({
       supportedLngs: SUPPORTED_LNGS,
-      fallbackLng: {
-        'zh-HK': ['zh-TW', 'en'],
-        'pt-BR': ['pt', 'en'],
-        kk: ['ru', 'en'],
-        ky: ['ru', 'en'],
-        tk: ['ru', 'en'],
-        ug: ['ru', 'en'],
-        tt: ['ru', 'en'],
-        default: ['en'],
-      },
+      fallbackLng: getFallbackLanguages,
       ns: ['translation'],
       defaultNS: 'translation',
       ...(isBrowser && {

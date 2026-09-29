@@ -4,7 +4,8 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Server, CheckCircle2 } from 'lucide-react';
 
-import { connectBackendEndpoint } from '@/services/backendEndpoint';
+import { useTranslation } from '@/hooks/useTranslation';
+import { BackendEndpointError, connectBackendEndpoint } from '@/services/backendEndpoint';
 import type { BackendConnection } from '@/services/backendEndpoint';
 import { applyBackendConnection } from '@/utils/supabase';
 
@@ -14,6 +15,7 @@ interface BackendEndpointFormProps {
 }
 
 export const BackendEndpointForm = ({ initialEndpoint, onConnected }: BackendEndpointFormProps) => {
+  const _ = useTranslation();
   const [endpoint, setEndpoint] = useState(initialEndpoint);
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(!!initialEndpoint);
@@ -31,7 +33,17 @@ export const BackendEndpointForm = ({ initialEndpoint, onConnected }: BackendEnd
       onConnected(connection);
     } catch (reason) {
       setConnected(false);
-      setError(reason instanceof Error ? reason.message : 'Unable to connect to endpoint');
+      if (reason instanceof BackendEndpointError) {
+        const message = {
+          invalidUrl: _('Invalid server endpoint URL'),
+          invalidProtocol: _('Endpoint must use HTTP or HTTPS'),
+          connectionFailed: _('Unable to connect to endpoint'),
+          invalidConfiguration: _('Endpoint returned invalid runtime configuration'),
+        }[reason.code];
+        setError(reason.status === undefined ? message : `${message} (${reason.status})`);
+      } else {
+        setError(_('Unable to connect to endpoint'));
+      }
     } finally {
       setConnecting(false);
     }
@@ -40,7 +52,7 @@ export const BackendEndpointForm = ({ initialEndpoint, onConnected }: BackendEnd
   return (
     <form onSubmit={handleSubmit} className='mb-6 w-full'>
       <label htmlFor='backend-endpoint' className='mb-2 block text-sm font-medium'>
-        Server endpoint
+        {_('Server endpoint')}
       </label>
       <div className='flex gap-2'>
         <label className='input input-bordered eink-bordered flex h-11 min-w-0 flex-1 items-center gap-2'>
@@ -60,14 +72,14 @@ export const BackendEndpointForm = ({ initialEndpoint, onConnected }: BackendEnd
             autoCorrect='off'
             spellCheck={false}
           />
-          {connected && <CheckCircle2 aria-label='Connected' className='h-4 w-4 shrink-0' />}
+          {connected && <CheckCircle2 aria-label={_('Connected')} className='h-4 w-4 shrink-0' />}
         </label>
         <button
           type='submit'
           className='btn btn-contrast h-11 min-h-11 shrink-0'
           disabled={connecting}
         >
-          {connecting ? 'Connecting...' : 'Connect'}
+          {connecting ? _('Connecting...') : _('Connect')}
         </button>
       </div>
       {error && (

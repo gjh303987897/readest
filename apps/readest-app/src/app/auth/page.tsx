@@ -87,6 +87,8 @@ export default function AuthPage() {
             sign_in: {
               email_label: _('Email address'),
               password_label: _('Your Password'),
+              email_input_placeholder: _('Your email address'),
+              password_input_placeholder: _('Your password'),
               button_label: _('Sign in'),
               loading_button_label: _('Signing in...'),
               link_text: _('Already have an account? Sign in'),
@@ -94,6 +96,8 @@ export default function AuthPage() {
             sign_up: {
               email_label: _('Email address'),
               password_label: _('Create a Password'),
+              email_input_placeholder: _('Your email address'),
+              password_input_placeholder: _('Your password'),
               button_label: _('Sign up'),
               loading_button_label: _('Signing up...'),
               link_text: _("Don't have an account? Sign up"),
@@ -101,6 +105,7 @@ export default function AuthPage() {
             },
             forgotten_password: {
               email_label: _('Email address'),
+              email_input_placeholder: _('Your email address'),
               button_label: _('Send reset password instructions'),
               loading_button_label: _('Sending reset instructions ...'),
               link_text: _('Forgot your password?'),

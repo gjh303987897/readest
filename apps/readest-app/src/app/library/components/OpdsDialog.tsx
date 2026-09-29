@@ -59,9 +59,9 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
       setSelected(new Set());
       setQuery('');
     } catch (loadError) {
-      const message =
-        loadError instanceof Error ? loadError.message : 'Failed to load OPDS catalog';
-      setError(_(message));
+      setError(
+        loadError instanceof Error ? _(loadError.message) : _('Failed to load OPDS catalog'),
+      );
     } finally {
       setLoading(false);
     }

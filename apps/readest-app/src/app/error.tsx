@@ -44,7 +44,7 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
             <div className='text-error animate-pulse text-8xl'>⚠️</div>
           </div>
 
-          <h1 className='text-base-content mb-4 text-5xl font-bold'>Oops!</h1>
+          <h1 className='text-base-content mb-4 text-5xl font-bold'>{_('Oops!')}</h1>
 
           <p className='text-base-content/70 mb-8 text-lg'>
             {_('Something went wrong. You can retry or return to your library.')}
@@ -58,7 +58,7 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
               </p>
               {browserInfo && (
                 <p className='overflow-wrap-anywhere mt-2 w-full break-words font-mono text-sm'>
-                  Browser: {browserInfo}
+                  {_('Browser:')} {browserInfo}
                 </p>
               )}
               {error.stack && (
@@ -68,7 +68,7 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
               )}
               {error.digest && (
                 <p className='overflow-wrap-anywhere mt-2 w-full break-words text-xs opacity-70'>
-                  Error ID: {error.digest}
+                  {_('Error ID:')} {error.digest}
                 </p>
               )}
             </div>

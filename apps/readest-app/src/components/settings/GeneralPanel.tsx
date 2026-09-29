@@ -4,19 +4,12 @@ import { useEnv } from '@/context/EnvContext';
 import { saveViewSettings } from '@/helpers/settings';
 import { useTranslation } from '@/hooks/useTranslation';
 import { SUPPORTED_LNGS } from '@/i18n/i18n';
+import { TRANSLATED_LANGS } from '@/services/constants';
 import { useSettingsStore } from '@/store/settingsStore';
 import { useThemeStore } from '@/store/themeStore';
 import type { SettingsPanelPanelProp } from './SettingsDialog';
 import { BoxedList, SettingsRow, SettingsSelect } from './primitives';
 import ThemeModeSelector from './theme/ThemeModeSelector';
-
-const getNativeLanguageName = (language: string): string => {
-  try {
-    return new Intl.DisplayNames([language], { type: 'language' }).of(language) ?? language;
-  } catch {
-    return language;
-  }
-};
 
 const GeneralPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => {
   const _ = useTranslation();
@@ -29,7 +22,7 @@ const GeneralPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => 
       { value: '', label: _('System Language') },
       ...SUPPORTED_LNGS.map((language) => ({
         value: language,
-        label: getNativeLanguageName(language),
+        label: TRANSLATED_LANGS[language as keyof typeof TRANSLATED_LANGS] ?? language,
       })),
     ],
     [_],
