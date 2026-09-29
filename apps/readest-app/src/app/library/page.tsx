@@ -20,6 +20,7 @@ import {
   Settings,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react';
 
 import type { Book } from '@/types/book';
@@ -79,11 +80,14 @@ const LibraryPage = () => {
   const { selectFiles } = useFileSelector(appService, _);
   const { pullLibrary, pushLibrary } = useBooksSync();
   const [query, setQuery] = useState('');
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [importing, setImporting] = useState(false);
   const [busyBookHash, setBusyBookHash] = useState<string | null>(null);
   const [isUnlockDialogOpen, setUnlockDialogOpen] = useState(false);
   const [isOpdsDialogOpen, setOpdsDialogOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
+  const searchButtonRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const showWindowControls = !!appService?.hasWindowBar && !appService.hasTrafficLight;
   const { safeAreaInsets, systemUIVisible, statusBarHeight } = useThemeStore();
   const topInset = appService?.hasSafeAreaInset
@@ -114,8 +118,23 @@ const LibraryPage = () => {
   );
 
   useEffect(() => {
-    if (!isUnlocked) setQuery('');
+    if (!isUnlocked) {
+      setQuery('');
+      setIsSearchExpanded(false);
+    }
   }, [isUnlocked]);
+
+  useEffect(() => {
+    if (!isSearchExpanded) return;
+    const frame = requestAnimationFrame(() => searchInputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [isSearchExpanded]);
+
+  const closeSearch = () => {
+    setQuery('');
+    setIsSearchExpanded(false);
+    requestAnimationFrame(() => searchButtonRef.current?.focus());
+  };
 
   const { handleBookUpload, handleBookDownload } = useBookTransferActions(
     envConfig,
@@ -317,28 +336,85 @@ const LibraryPage = () => {
       <header
         ref={headerRef}
         className={clsx(
-          'border-base-300 relative flex min-h-16 shrink-0 select-none items-center gap-3 border-b ps-4 sm:ps-6',
+          'border-base-300 relative flex min-h-16 shrink-0 select-none items-center gap-2 border-b ps-4 sm:gap-3 sm:ps-6',
           showWindowControls ? 'pe-36 sm:pe-40' : 'pe-4 sm:pe-6',
         )}
         style={{ marginTop: `${topInset}px` }}
       >
-        <div className='flex min-w-0 shrink-0 items-center gap-2'>
+        <div className='flex min-w-0 items-center gap-2'>
           <BookOpen aria-hidden='true' className='h-5 w-5 shrink-0' />
           <h1 className='truncate text-lg font-semibold'>readest-tiny</h1>
         </div>
 
-        <label className='exclude-title-bar-mousedown bg-base-200 focus-within:ring-primary mx-auto flex h-9 min-w-0 max-w-md flex-1 items-center gap-2 rounded px-3 focus-within:ring-1'>
-          <Search aria-hidden='true' className='h-4 w-4 shrink-0 opacity-60' />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className='min-w-0 flex-1 bg-transparent text-sm outline-none'
-            aria-label={_('Search Books')}
-            placeholder={_('Search Books')}
-          />
-        </label>
+        <div
+          className={clsx(
+            'exclude-title-bar-mousedown pointer-events-none relative z-40 mx-auto flex h-9 min-w-9 flex-1 justify-center',
+            isSearchExpanded &&
+              'max-sm:absolute max-sm:start-4 max-sm:top-1/2 max-sm:-translate-y-1/2',
+            isSearchExpanded && (showWindowControls ? 'max-sm:end-36' : 'max-sm:end-4'),
+          )}
+        >
+          <div
+            className={clsx(
+              'library-search eink-bordered pointer-events-auto flex h-9 max-w-md items-center overflow-hidden rounded border not-eink:transition-[width] not-eink:duration-200 not-eink:ease-out motion-reduce:transition-none',
+              isSearchExpanded
+                ? 'bg-base-200 border-base-300 focus-within:ring-primary w-full focus-within:ring-1'
+                : 'w-9 border-transparent bg-transparent',
+            )}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget) && !query.trim()) {
+                setIsSearchExpanded(false);
+              }
+            }}
+          >
+            <button
+              ref={searchButtonRef}
+              type='button'
+              className='flex h-9 w-9 shrink-0 items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-base-content/15'
+              title={_('Search Books')}
+              aria-label={_('Search Books')}
+              aria-controls='library-search-input'
+              aria-expanded={isSearchExpanded}
+              onClick={() => {
+                if (isSearchExpanded) searchInputRef.current?.focus();
+                else setIsSearchExpanded(true);
+              }}
+            >
+              <Search aria-hidden='true' className='h-4 w-4' />
+            </button>
+            <input
+              id='library-search-input'
+              ref={searchInputRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') closeSearch();
+              }}
+              className={clsx(
+                'min-w-0 flex-1 bg-transparent text-sm outline-none not-eink:transition-opacity not-eink:duration-150 motion-reduce:transition-none',
+                !isSearchExpanded && 'pointer-events-none opacity-0',
+              )}
+              aria-label={_('Search Books')}
+              aria-hidden={!isSearchExpanded}
+              tabIndex={isSearchExpanded ? 0 : -1}
+              disabled={!isSearchExpanded}
+              placeholder={_('Search Books')}
+            />
+            {isSearchExpanded && (
+              <button
+                type='button'
+                className='flex h-9 w-9 shrink-0 items-center justify-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-base-content/15'
+                title={_('Close Search')}
+                aria-label={_('Close Search')}
+                onClick={closeSearch}
+              >
+                <X aria-hidden='true' className='h-4 w-4' />
+              </button>
+            )}
+          </div>
+        </div>
 
-        <div className='exclude-title-bar-mousedown flex shrink-0 items-center gap-2'>
+        <div className='exclude-title-bar-mousedown flex shrink-0 items-center gap-1 sm:gap-2'>
           {hasPin && (
             <button
               type='button'

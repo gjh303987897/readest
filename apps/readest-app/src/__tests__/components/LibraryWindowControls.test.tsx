@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/hooks/useTranslation', () => ({
@@ -77,5 +77,57 @@ describe('Library window controls', () => {
     expect(screen.getByRole('button', { name: 'Minimize' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Maximize or Restore' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy();
+  });
+});
+
+describe('Library header search', () => {
+  it('starts as a button and expands into a focused search field', async () => {
+    const { container } = render(<LibraryPage />);
+
+    expect(screen.queryByRole('textbox', { name: 'Search Books' })).toBeNull();
+    const button = screen.getByRole('button', { name: 'Search Books' });
+    const search = container.querySelector('.library-search');
+    expect(search).not.toBeNull();
+    expect(search?.className).toContain('transition-[width]');
+
+    fireEvent.click(button);
+
+    await waitFor(() =>
+      expect(screen.getByRole('textbox', { name: 'Search Books' })).toBe(document.activeElement),
+    );
+    expect(search?.className).toContain('w-full');
+  });
+
+  it('keeps a nonempty query visible and clears it when dismissed', async () => {
+    render(<LibraryPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search Books' }));
+    const input = screen.getByRole('textbox', { name: 'Search Books' }) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: 'Alice' } });
+    fireEvent.blur(input);
+    expect(screen.getByRole('textbox', { name: 'Search Books' })).toBeTruthy();
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('textbox', { name: 'Search Books' })).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Search Books' })).toBe(document.activeElement),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Search Books' }));
+    expect((screen.getByRole('textbox', { name: 'Search Books' }) as HTMLInputElement).value).toBe(
+      '',
+    );
+  });
+
+  it('keeps the close button reachable and collapses when focus leaves an empty search', () => {
+    render(<LibraryPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search Books' }));
+    const closeButton = screen.getByRole('button', { name: 'Close Search' });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Search Books' }), {
+      relatedTarget: closeButton,
+    });
+    expect(screen.getByRole('textbox', { name: 'Search Books' })).toBeTruthy();
+    fireEvent.blur(closeButton);
+
+    expect(screen.queryByRole('textbox', { name: 'Search Books' })).toBeNull();
   });
 });
