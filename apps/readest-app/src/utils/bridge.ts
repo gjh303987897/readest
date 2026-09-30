@@ -13,6 +13,7 @@ export interface CopyURIResponse {
 export interface SetSystemUIVisibilityRequest {
   visible: boolean;
   darkMode: boolean;
+  followSystem?: boolean; // iOS only
 }
 
 export interface SetSystemUIVisibilityResponse {

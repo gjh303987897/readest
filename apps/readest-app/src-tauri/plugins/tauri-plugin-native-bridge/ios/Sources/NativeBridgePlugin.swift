@@ -29,6 +29,7 @@ func getLocalizedDisplayName(familyName: String) -> String? {
 class SetSystemUIVisibilityRequestArgs: Decodable {
   let visible: Bool
   let darkMode: Bool
+  let followSystem: Bool?
 }
 
 class InterceptKeysRequestArgs: Decodable {
@@ -421,12 +422,24 @@ extension WebViewLifecycleManager: WKNavigationDelegate {
   }
 }
 
+private final class LegacyColorSchemeObserverView: UIView {
+  var onChange: (() -> Void)?
+
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if traitCollection.userInterfaceStyle != previousTraitCollection?.userInterfaceStyle {
+      onChange?()
+    }
+  }
+}
+
 class NativeBridgePlugin: Plugin {
   private var webView: WKWebView?
   private var currentOrientationMask: UIInterfaceOrientationMask = .all
   private var originalDelegate: UIApplicationDelegate?
   private var webViewLifecycleManager: WebViewLifecycleManager?
   private var traitChangeRegistered = false
+  private var legacyColorSchemeObserver: LegacyColorSchemeObserverView?
 
   // Screen-brightness management. `UIScreen.main.brightness` is a *global*
   // device setting, not a per-window one: once the app writes to it, iOS
@@ -446,12 +459,14 @@ class NativeBridgePlugin: Plugin {
     webViewLifecycleManager?.startMonitoring(webView: webview)
     logger.log("NativeBridgePlugin: WebView lifecycle monitoring activated")
 
-    // The WKWebView never fires the `prefers-color-scheme` media query
-    // `change` event while the app stays foregrounded, so observe the
-    // native appearance and push changes to JS instead. Registration is
-    // deferred because the window scene may not be connected yet.
+    // Observe UIKit appearance changes because WKWebView does not reliably
+    // dispatch the media-query change event while the app is foregrounded.
     DispatchQueue.main.async { [weak self] in
-      self?.registerTraitChangeObserverIfNeeded()
+      if #available(iOS 17.0, *) {
+        self?.registerTraitChangeObserverIfNeeded()
+      } else {
+        self?.observeLegacyColorSchemeChanges()
+      }
     }
 
     NotificationCenter.default.addObserver(
@@ -521,6 +536,7 @@ class NativeBridgePlugin: Plugin {
   // the real system appearance and is unaffected by the per-window
   // `overrideUserInterfaceStyle` that `set_system_ui_visibility` applies.
   private func foregroundWindowScene() -> UIWindowScene? {
+    if let scene = webView?.window?.windowScene { return scene }
     let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
     return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
   }
@@ -542,6 +558,15 @@ class NativeBridgePlugin: Plugin {
         self?.notifyColorSchemeChange()
       }
     }
+  }
+
+  private func observeLegacyColorSchemeChanges() {
+    guard legacyColorSchemeObserver == nil, let webView = webView else { return }
+    let observer = LegacyColorSchemeObserverView(frame: .zero)
+    observer.isUserInteractionEnabled = false
+    observer.onChange = { [weak self] in self?.notifyColorSchemeChange() }
+    webView.addSubview(observer)
+    legacyColorSchemeObserver = observer
   }
 
   private func notifyColorSchemeChange() {
@@ -659,6 +684,7 @@ class NativeBridgePlugin: Plugin {
     let args = try invoke.parseArgs(SetSystemUIVisibilityRequestArgs.self)
     let visible = args.visible
     let darkMode = args.darkMode
+    let followSystem = args.followSystem == true
 
     DispatchQueue.main.async {
       UIApplication.shared.setStatusBarHidden(!visible, with: .none)
@@ -667,9 +693,9 @@ class NativeBridgePlugin: Plugin {
         .compactMap { $0 as? UIWindowScene }
         .flatMap { $0.windows }
 
-      let keyWindow = windows.first(where: { $0.isKeyWindow }) ?? windows.first
+      let keyWindow = self.webView?.window ?? windows.first(where: { $0.isKeyWindow }) ?? windows.first
       if let keyWindow = keyWindow {
-        keyWindow.overrideUserInterfaceStyle = darkMode ? .dark : .light
+        keyWindow.overrideUserInterfaceStyle = followSystem ? .unspecified : (darkMode ? .dark : .light)
         keyWindow.layoutIfNeeded()
       } else {
         logger.error("No key window found")
@@ -1298,6 +1324,7 @@ extension NativeBridgePlugin: UIApplicationDelegate {
   /*
     Proxy all application delegate methods to the original delegate:
       sel!(application:didFinishLaunchingWithOptions:),
+      sel!(application:configurationForConnectingSceneSession:options:),
       sel!(application:openURL:options:),
       sel!(application:continue:restorationHandler:),
       sel!(applicationDidBecomeActive:),
@@ -1313,6 +1340,15 @@ extension NativeBridgePlugin: UIApplicationDelegate {
   ) -> Bool {
     self.originalDelegate?.application?(application, didFinishLaunchingWithOptions: launchOptions)
       ?? false
+  }
+
+  public func application(
+    _ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession,
+    options: UIScene.ConnectionOptions
+  ) -> UISceneConfiguration {
+    self.originalDelegate?.application?(
+      application, configurationForConnecting: connectingSceneSession, options: options)
+      ?? connectingSceneSession.configuration
   }
 
   public func application(

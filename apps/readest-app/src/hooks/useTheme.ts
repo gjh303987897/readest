@@ -23,6 +23,7 @@ export const useTheme = ({
   const isColorEink = settings?.globalViewSettings?.isColorEink;
   const isBwEink = isEink && !isColorEink;
   const {
+    themeMode,
     themeColor,
     isDarkMode,
     showSystemUI,
@@ -33,6 +34,7 @@ export const useTheme = ({
     setSystemUIAlwaysHidden,
   } = useThemeStore();
   const { onUpdateInsets } = useSafeAreaInsets();
+  const iosThemeMode = appService?.isIOSApp ? themeMode : undefined;
 
   const useFallbackColors = useRef(false);
 
@@ -59,14 +61,18 @@ export const useTheme = ({
       } else {
         dismissSystemUI();
       }
-      setSystemUIVisibility({ visible, darkMode: isDarkMode }).then(() => {
+      setSystemUIVisibility({
+        visible,
+        darkMode: isDarkMode,
+        ...(appService.isIOSApp ? { followSystem: iosThemeMode === 'auto' } : {}),
+      }).then(() => {
         if (updateInsets) {
           onUpdateInsets();
         }
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [appService, isDarkMode, systemUIVisible],
+    [appService, isDarkMode, systemUIVisible, iosThemeMode],
   );
 
   useEffect(() => {
