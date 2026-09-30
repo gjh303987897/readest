@@ -340,6 +340,18 @@ jobs:
           workspaces: apps/readest-app/src-tauri -> target
           key: android-release-${{ matrix.target }}
 
+      - name: Initialize Android project and Gradle
+        working-directory: apps/readest-app
+        run: |
+          rm -rf src-tauri/gen/android
+          pnpm tauri android init --ci
+          cat >> src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties <<'EOF'
+          networkTimeout=60000
+          retries=3
+          retryBackOffMs=2000
+          EOF
+          src-tauri/gen/android/gradlew --version
+
       - name: Build optimized release APK
         working-directory: apps/readest-app
         env:
@@ -349,8 +361,6 @@ jobs:
           CARGO_PROFILE_RELEASE_STRIP: symbols
           NODE_OPTIONS: --max-old-space-size=8192
         run: |
-          rm -rf src-tauri/gen/android
-          pnpm tauri android init --ci
           pnpm icons:generate
           pnpm build
           find out -type f -name '*.map' -delete
