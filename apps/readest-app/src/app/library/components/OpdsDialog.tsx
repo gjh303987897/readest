@@ -1,7 +1,15 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { BookText, ChevronLeft, Download, LoaderCircle, Search, Server } from 'lucide-react';
+import {
+  BookText,
+  ChevronLeft,
+  Download,
+  LoaderCircle,
+  Search,
+  Server,
+  Trash2,
+} from 'lucide-react';
 
 import Dialog from '@/components/Dialog';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -19,11 +27,47 @@ interface OpdsDialogProps {
   onImportFiles: (files: File[]) => Promise<number>;
 }
 
+interface SavedOpdsLogin {
+  url: string;
+  username: string;
+  password: string;
+  title: string;
+}
+
+const SAVED_LOGINS_KEY = 'readest-opds-logins-v1';
+
+const readSavedLogins = (): SavedOpdsLogin[] => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SAVED_LOGINS_KEY) ?? '[]');
+    if (!Array.isArray(stored)) return [];
+    return stored.filter((entry): entry is SavedOpdsLogin => {
+      if (
+        !entry ||
+        typeof entry.url !== 'string' ||
+        typeof entry.username !== 'string' ||
+        typeof entry.password !== 'string' ||
+        typeof entry.title !== 'string'
+      ) {
+        return false;
+      }
+      try {
+        return ['http:', 'https:'].includes(new URL(entry.url).protocol);
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return [];
+  }
+};
+
 const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles }) => {
   const _ = useTranslation();
   const [catalogUrl, setCatalogUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [saveLogin, setSaveLogin] = useState(false);
+  const [savedLogins, setSavedLogins] = useState<SavedOpdsLogin[]>(readSavedLogins);
   const [catalog, setCatalog] = useState<OpdsCatalog | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -48,16 +92,42 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     );
   }, [publications, query]);
 
-  const handleConnect = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!catalogUrl.trim() || loading) return;
+  const persistSavedLogins = (next: SavedOpdsLogin[]) => {
+    try {
+      localStorage.setItem(SAVED_LOGINS_KEY, JSON.stringify(next));
+      setSavedLogins(next);
+    } catch {
+      setError(_('Could not update saved logins on this device'));
+    }
+  };
+
+  const connect = async (url: string, login: OpdsCredentials, remember: boolean) => {
+    if (!url.trim() || loading) return;
+    setCatalogUrl(url);
+    setUsername(login.username ?? '');
+    setPassword(login.password ?? '');
     setLoading(true);
     setError('');
     try {
-      const loadedCatalog = await loadOpdsPublications(catalogUrl, credentials);
+      const loadedCatalog = await loadOpdsPublications(url, login);
       setCatalog(loadedCatalog);
       setSelected(new Set());
       setQuery('');
+      if (remember) {
+        const saved = {
+          url: new URL(url.trim()).toString(),
+          username: login.username ?? '',
+          password: login.password ?? '',
+          title: loadedCatalog.title,
+        };
+        persistSavedLogins([
+          saved,
+          ...savedLogins.filter(
+            (entry) => entry.url !== saved.url || entry.username !== saved.username,
+          ),
+        ]);
+        setSaveLogin(false);
+      }
     } catch (loadError) {
       setError(
         loadError instanceof Error ? _(loadError.message) : _('Failed to load OPDS catalog'),
@@ -65,6 +135,17 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleConnect = (event: React.FormEvent) => {
+    event.preventDefault();
+    void connect(catalogUrl, credentials, saveLogin);
+  };
+
+  const removeSavedLogin = (login: SavedOpdsLogin) => {
+    persistSavedLogins(
+      savedLogins.filter((entry) => entry.url !== login.url || entry.username !== login.username),
+    );
   };
 
   const togglePublication = (id: string) => {
@@ -141,7 +222,10 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
       contentClassName='!flex !min-h-0 !flex-col !overflow-hidden !px-4 sm:!px-6'
     >
       {!catalog ? (
-        <form className='mx-auto flex w-full max-w-lg flex-col gap-4 py-4' onSubmit={handleConnect}>
+        <form
+          className='mx-auto flex min-h-0 w-full max-w-lg flex-col gap-4 overflow-y-auto py-4'
+          onSubmit={handleConnect}
+        >
           <label className='flex flex-col gap-1.5'>
             <span className='text-sm font-medium'>{_('Catalog URL')}</span>
             <div className='eink-bordered border-base-300 bg-base-100 flex h-11 items-center gap-2 rounded-lg border px-3 focus-within:ring-2 focus-within:ring-base-content/15'>
@@ -185,6 +269,21 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
             </label>
           </div>
 
+          <div>
+            <label className='flex cursor-pointer items-center gap-2 text-sm'>
+              <input
+                type='checkbox'
+                className='checkbox checkbox-sm'
+                checked={saveLogin}
+                onChange={(event) => setSaveLogin(event.target.checked)}
+              />
+              <span>{_('Save login')}</span>
+            </label>
+            <p className='text-base-content/60 mt-1 text-xs'>
+              {_('Saved passwords are stored unencrypted on this device.')}
+            </p>
+          </div>
+
           {error && <p className='text-error text-sm'>{error}</p>}
           <button
             type='submit'
@@ -198,6 +297,51 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
             )}
             {_('Connect')}
           </button>
+
+          {savedLogins.length > 0 && (
+            <section className='border-base-200 mt-2 border-t pt-4'>
+              <h2 className='mb-2 text-sm font-semibold'>{_('Saved logins')}</h2>
+              <div className='flex flex-col gap-2'>
+                {savedLogins.map((login) => (
+                  <div
+                    key={`${login.url}\u0000${login.username}`}
+                    className='eink-bordered border-base-300 flex min-w-0 items-center rounded-lg border'
+                  >
+                    <button
+                      type='button'
+                      className='hover:bg-base-200/60 flex min-w-0 flex-1 items-center gap-3 rounded-l-lg px-3 py-2 text-start transition-colors'
+                      onClick={() =>
+                        void connect(
+                          login.url,
+                          { username: login.username, password: login.password },
+                          false,
+                        )
+                      }
+                      disabled={loading}
+                    >
+                      <Server aria-hidden='true' className='h-4 w-4 shrink-0 opacity-60' />
+                      <span className='min-w-0 flex-1'>
+                        <span className='block truncate text-sm font-medium'>{login.title}</span>
+                        <span className='text-base-content/60 block truncate text-xs'>
+                          {login.username ? `${login.username} @ ${login.url}` : login.url}
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      type='button'
+                      className='btn btn-ghost btn-square h-9 min-h-9 w-9 shrink-0'
+                      onClick={() => removeSavedLogin(login)}
+                      disabled={loading}
+                      title={_('Remove saved login for {{title}}', { title: login.title })}
+                      aria-label={_('Remove saved login for {{title}}', { title: login.title })}
+                    >
+                      <Trash2 aria-hidden='true' className='h-4 w-4' />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </form>
       ) : (
         <div className='flex min-h-0 flex-1 flex-col'>
