@@ -223,7 +223,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     >
       {!catalog ? (
         <form
-          className='mx-auto flex min-h-0 w-full max-w-lg flex-col gap-4 overflow-y-auto py-4'
+          className='view-switch-enter mx-auto flex min-h-0 w-full max-w-lg flex-col gap-4 overflow-y-auto py-4'
           onSubmit={handleConnect}
         >
           <label className='flex flex-col gap-1.5'>
@@ -344,7 +344,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
           )}
         </form>
       ) : (
-        <div className='flex min-h-0 flex-1 flex-col'>
+        <div className='view-switch-enter flex min-h-0 flex-1 flex-col'>
           <div className='border-base-200 flex shrink-0 items-center gap-3 border-b pb-3'>
             <button
               type='button'

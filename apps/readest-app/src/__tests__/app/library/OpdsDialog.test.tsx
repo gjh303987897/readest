@@ -66,6 +66,22 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('OPDS catalog dialog', () => {
+  it('animates the content when switching between login and catalog views', async () => {
+    render(<OpdsDialog isOpen onClose={() => {}} onImportFiles={async () => 0} />);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.querySelector('form')?.classList.contains('view-switch-enter')).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('Catalog URL'), {
+      target: { value: 'https://books.example.com/opds' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(await screen.findByText('First Book')).toBeTruthy();
+    expect(dialog.querySelector('.view-switch-enter')?.textContent).toContain('First Book');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change catalog' }));
+    expect(dialog.querySelector('form')?.classList.contains('view-switch-enter')).toBe(true);
+  });
+
   it('loads the catalog and imports every selected publication', async () => {
     const onImportFiles = vi.fn(async (files: File[]) => files.length);
     render(<OpdsDialog isOpen onClose={() => {}} onImportFiles={onImportFiles} />);

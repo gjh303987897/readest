@@ -81,7 +81,7 @@ const SidebarContent: React.FC<{
         }}
         defer
       >
-        <div className='scroll-container h-full' role='tabpanel'>
+        <div key={activeTab} className='scroll-container view-switch-enter h-full' role='tabpanel'>
           {activeTab === 'toc' && bookDoc.toc && (
             <TOCView toc={bookDoc.toc} bookKey={sideBarBookKey} />
           )}

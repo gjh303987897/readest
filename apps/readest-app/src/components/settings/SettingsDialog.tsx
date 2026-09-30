@@ -139,7 +139,12 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
         </div>
       }
     >
-      <div role='tabpanel' aria-label={currentLabel}>
+      <div
+        key={activePanel}
+        role='tabpanel'
+        aria-label={currentLabel}
+        className='view-switch-enter'
+      >
         {activePanel === 'General' && (
           <GeneralPanel onRegisterReset={(reset) => registerReset('General', reset)} bookKey='' />
         )}
