@@ -65,6 +65,8 @@ const Dialog: React.FC<DialogProps> = ({
   const [isRtl] = useState(() => getDirFromUILanguage() === 'rtl');
   const dialogRef = useRef<HTMLDialogElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const dragDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dismissedByDragRef = useRef(false);
   const [isAnimating, setIsAnimating] = useState(false);
   const [shouldRender, setShouldRender] = useState(isOpen);
   const iconSize22 = useResponsiveSize(22);
@@ -94,6 +96,18 @@ const Dialog: React.FC<DialogProps> = ({
         setIsAnimating(true);
       });
     } else {
+      if (dragDismissTimerRef.current) {
+        clearTimeout(dragDismissTimerRef.current);
+        dragDismissTimerRef.current = null;
+      }
+      if (dismissedByDragRef.current) {
+        dismissedByDragRef.current = false;
+        setIsAnimating(false);
+        setShouldRender(false);
+        return;
+      }
+      const modal = dialogRef.current?.querySelector<HTMLElement>('.modal-box');
+      if (modal) modal.style.animation = '';
       // Trigger exit animation
       setIsAnimating(false);
       // Wait for animation to complete before unmounting
@@ -104,6 +118,13 @@ const Dialog: React.FC<DialogProps> = ({
     }
     return undefined;
   }, [isOpen]);
+
+  useEffect(
+    () => () => {
+      if (dragDismissTimerRef.current) clearTimeout(dragDismissTimerRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!shouldRender) {
@@ -153,7 +174,7 @@ const Dialog: React.FC<DialogProps> = ({
   }, [shouldRender]);
 
   const handleDragMove = (data: { clientY: number; deltaY: number }) => {
-    if (!dismissible || !isMobile || !dialogRef.current) return;
+    if (!dismissible || !isMobile || !dialogRef.current || dragDismissTimerRef.current) return;
 
     const modal = dialogRef.current.querySelector('.modal-box') as HTMLElement;
     const overlay = dialogRef.current.querySelector('.overlay') as HTMLElement;
@@ -162,17 +183,19 @@ const Dialog: React.FC<DialogProps> = ({
     const newTop = Math.max(0.0, Math.min(1, heightFraction));
 
     if (modal && overlay) {
+      modal.style.animation = 'none';
+      modal.style.transition = 'none';
+      overlay.style.transition = 'none';
       modal.style.height = '100%';
       modal.style.transform = `translateY(${newTop * 100}%)`;
       overlay.style.opacity = `${1 - heightFraction}`;
 
       setIsFullHeightInMobile(data.clientY < 44);
-      modal.style.transition = `padding-top 0.2s ease-out`;
     }
   };
 
   const handleDragEnd = (data: { velocity: number; clientY: number }) => {
-    if (!dismissible || !isMobile || !dialogRef.current) return;
+    if (!dismissible || !isMobile || !dialogRef.current || dragDismissTimerRef.current) return;
     const modal = dialogRef.current.querySelector('.modal-box') as HTMLElement;
     const overlay = dialogRef.current.querySelector('.overlay') as HTMLElement;
     if (!modal || !overlay) return;
@@ -190,10 +213,11 @@ const Dialog: React.FC<DialogProps> = ({
       modal.style.transform = 'translateY(100%)';
       overlay.style.transition = `opacity ${transitionDuration}s ease-out`;
       overlay.style.opacity = '0';
-      onClose();
-      setTimeout(() => {
-        modal.style.transform = 'translateY(0%)';
-      }, 300);
+      dismissedByDragRef.current = true;
+      dragDismissTimerRef.current = setTimeout(() => {
+        dragDismissTimerRef.current = null;
+        onClose();
+      }, transitionDuration * 1000);
     } else if (
       snapHeight &&
       data.clientY > window.innerHeight * snapUpper &&
@@ -201,7 +225,7 @@ const Dialog: React.FC<DialogProps> = ({
     ) {
       // dialog is snapped
       overlay.style.transition = `opacity 0.2s ease-out`;
-      modal.style.opacity = `${1 - snapHeight}`;
+      overlay.style.opacity = '1';
       modal.style.height = `${snapHeight * 100}%`;
       modal.style.bottom = '0';
       modal.style.transition = `transform 0.2s ease-out`;
@@ -212,7 +236,8 @@ const Dialog: React.FC<DialogProps> = ({
       modal.style.height = '100%';
       modal.style.transition = `transform 0.2s ease-out`;
       modal.style.transform = `translateY(0%)`;
-      overlay.style.opacity = '0';
+      overlay.style.transition = `opacity 0.2s ease-out`;
+      overlay.style.opacity = '1';
     }
     if (appService?.hasHaptics) {
       impactFeedback('medium');
