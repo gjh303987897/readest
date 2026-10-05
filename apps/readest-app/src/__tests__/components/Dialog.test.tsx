@@ -9,6 +9,8 @@ const drag = vi.hoisted(() => ({
   end: (_data: { clientY: number; velocity: number }) => {},
 }));
 
+const device = vi.hoisted(() => ({ isMobile: false, isDesktopApp: false }));
+
 vi.mock('@/hooks/useDrag', () => ({
   useDrag: (onMove: typeof drag.move, _onKeyDown: () => void, onEnd: typeof drag.end) => {
     drag.move = onMove;
@@ -16,7 +18,7 @@ vi.mock('@/hooks/useDrag', () => ({
     return { handleDragStart: () => {} };
   },
 }));
-vi.mock('@/context/EnvContext', () => ({ useEnv: () => ({ appService: {} }) }));
+vi.mock('@/context/EnvContext', () => ({ useEnv: () => ({ appService: device }) }));
 vi.mock('@/store/themeStore', () => ({
   useThemeStore: () => ({ systemUIVisible: false, statusBarHeight: 0, safeAreaInsets: {} }),
 }));
@@ -31,9 +33,43 @@ vi.mock('@/hooks/useResponsiveSize', () => ({ useResponsiveSize: (size: number) 
 vi.mock('@/utils/rtl', () => ({ getDirFromUILanguage: () => 'ltr' }));
 
 beforeEach(() => {
+  device.isMobile = false;
+  device.isDesktopApp = false;
   vi.useFakeTimers();
   vi.stubGlobal('innerWidth', 390);
   vi.stubGlobal('innerHeight', 800);
+});
+
+describe('Dialog desktop sizing', () => {
+  it('does not turn an 800 by 600 desktop window into a full-height sheet', () => {
+    device.isDesktopApp = true;
+    vi.stubGlobal('innerWidth', 800);
+    vi.stubGlobal('innerHeight', 600);
+    render(
+      <Dialog isOpen onClose={() => {}}>
+        Content
+      </Dialog>,
+    );
+
+    const modal = document.querySelector<HTMLElement>('.modal-box');
+    expect(modal?.style.height).toBe('');
+    expect(modal?.style.bottom).toBe('');
+    act(() => vi.advanceTimersByTime(16));
+    expect(modal?.classList.contains('dialog-enter')).toBe(true);
+  });
+
+  it('keeps the mobile settings sheet snapped in landscape', () => {
+    device.isMobile = true;
+    vi.stubGlobal('innerWidth', 900);
+    vi.stubGlobal('innerHeight', 700);
+    render(
+      <Dialog isOpen snapHeight={0.7} onClose={() => {}}>
+        Content
+      </Dialog>,
+    );
+
+    expect(document.querySelector<HTMLElement>('.modal-box')?.style.height).toBe('70%');
+  });
 });
 
 afterEach(() => {

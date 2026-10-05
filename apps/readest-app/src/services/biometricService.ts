@@ -1,4 +1,5 @@
 import { authenticate, checkStatus, type AuthOptions } from '@tauri-apps/plugin-biometric';
+import environment from './environment';
 
 export interface BiometricConfig {
   enabled: boolean;
@@ -27,6 +28,8 @@ export class BiometricService {
    */
   async authenticate(config?: Partial<BiometricConfig>): Promise<boolean> {
     try {
+      if (!(await environment.getAppService()).isMobileApp) return false;
+
       const options: AuthOptions = {
         title: config?.promptTitle || 'Unlock Privacy Mode',
         subtitle: config?.promptSubtitle,
@@ -52,6 +55,8 @@ export class BiometricService {
    */
   async isAvailable(): Promise<boolean> {
     try {
+      if (!(await environment.getAppService()).isMobileApp) return false;
+
       const status = await checkStatus();
       return status.isAvailable;
     } catch (error) {

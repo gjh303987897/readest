@@ -70,7 +70,7 @@ const Dialog: React.FC<DialogProps> = ({
   const [isAnimating, setIsAnimating] = useState(false);
   const [shouldRender, setShouldRender] = useState(isOpen);
   const iconSize22 = useResponsiveSize(22);
-  const isMobile = window.innerWidth < 640 || window.innerHeight < 640;
+  const isMobile = !!appService?.isMobile || (!appService?.isDesktopApp && window.innerWidth < 640);
 
   const handleKeyDown = (event: KeyboardEvent | CustomEvent): boolean => {
     if (event instanceof CustomEvent) {
@@ -307,13 +307,14 @@ const Dialog: React.FC<DialogProps> = ({
           className={clsx(
             'drag-handle mb-2 h-6 max-h-6 min-h-6 w-full cursor-row-resize items-center justify-center',
             'transition-padding-top flex duration-200 ease-out sm:hidden',
+            !isMobile && '!hidden',
           )}
           onMouseDown={handleDragStart}
           onTouchStart={handleDragStart}
         >
           <div className='bg-base-content/50 h-1 w-10 rounded-full'></div>
         </div>
-        <div className='dialog-header sticky top-1 z-10 flex items-center justify-between px-2 sm:pe-3 sm:ps-2'>
+        <div className='dialog-header sticky top-1 z-10 flex shrink-0 items-center justify-between px-2 sm:pe-3 sm:ps-2'>
           {header ? (
             header
           ) : (
@@ -367,7 +368,10 @@ const Dialog: React.FC<DialogProps> = ({
           // padding chassis so the body still occupies remaining height
           // and the children's horizontal rhythm is unchanged.
           <OverlayScrollbarsComponent
-            className={clsx('text-base-content my-2 flex-grow px-6 sm:px-[10%]', contentClassName)}
+            className={clsx(
+              'text-base-content my-2 min-h-0 flex-grow px-6 sm:px-[10%]',
+              contentClassName,
+            )}
             options={{
               scrollbars: { autoHide: 'scroll', clickScroll: true },
               showNativeOverlaidScrollbars: false,
@@ -379,7 +383,7 @@ const Dialog: React.FC<DialogProps> = ({
         ) : (
           <div
             className={clsx(
-              'text-base-content my-2 flex-grow overflow-y-auto px-6 sm:px-[10%]',
+              'text-base-content my-2 min-h-0 flex-grow overflow-y-auto px-6 sm:px-[10%]',
               contentClassName,
             )}
           >
