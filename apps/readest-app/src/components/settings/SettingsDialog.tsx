@@ -96,7 +96,7 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
       )}
       snapHeight={appService?.isMobile ? 0.7 : undefined}
       useOverlayScroll
-      header={
+      header={(onClose) => (
         <div className='flex w-full flex-col gap-2 py-2'>
           <div className='flex items-center justify-between gap-2'>
             <h2 className='ps-2 text-base font-semibold'>{_('Settings')}</h2>
@@ -117,7 +117,7 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
                 className='btn btn-ghost btn-sm btn-square'
                 title={_('Close')}
                 aria-label={_('Close')}
-                onClick={close}
+                onClick={onClose}
               >
                 <X className='h-4 w-4' />
               </button>
@@ -148,7 +148,7 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
             ))}
           </div>
         </div>
-      }
+      )}
     >
       <div
         key={activePanel}

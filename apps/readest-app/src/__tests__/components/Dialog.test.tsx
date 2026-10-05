@@ -1,4 +1,4 @@
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -76,6 +76,100 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe('Dialog close animation', () => {
+  it.each([
+    'button',
+    'overlay',
+    'Escape',
+  ])('finishes the exit before notifying the parent via %s', (action) => {
+    device.isDesktopApp = true;
+    const onClose = vi.fn();
+    const MountedDialog = () => {
+      const [isOpen, setIsOpen] = useState(true);
+      return isOpen ? (
+        <Dialog
+          isOpen
+          onClose={() => {
+            onClose();
+            setIsOpen(false);
+          }}
+        >
+          Content
+        </Dialog>
+      ) : null;
+    };
+    render(<MountedDialog />);
+    act(() => vi.advanceTimersByTime(16));
+
+    if (action === 'button') fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0]!);
+    else if (action === 'overlay') fireEvent.click(document.querySelector('.overlay')!);
+    else fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.querySelector('.modal-box')?.classList.contains('dialog-exit')).toBe(true);
+    act(() => vi.advanceTimersByTime(249));
+    expect(document.querySelector('dialog')).not.toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(document.querySelector('dialog')).toBeNull();
+  });
+
+  it('does not let a pending entrance restart a quick close', () => {
+    device.isDesktopApp = true;
+    const onClose = vi.fn();
+    render(
+      <Dialog isOpen onClose={onClose}>
+        Content
+      </Dialog>,
+    );
+    fireEvent.keyDown(window, { key: 'Escape' });
+    act(() => vi.advanceTimersByTime(16));
+
+    expect(document.querySelector('.modal-box')?.classList.contains('dialog-exit')).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(250));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('lets a custom settings header use the same animated close', () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog
+        isOpen
+        onClose={onClose}
+        header={(close) => <button onClick={close}>Close settings</button>}
+      >
+        Content
+      </Dialog>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(250));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a catalog open when it becomes non-dismissible during a download', () => {
+    const onClose = vi.fn();
+    const { rerender } = render(
+      <Dialog isOpen onClose={onClose}>
+        Catalog
+      </Dialog>,
+    );
+    act(() => vi.advanceTimersByTime(16));
+    rerender(
+      <Dialog isOpen dismissible={false} onClose={onClose}>
+        Catalog
+      </Dialog>,
+    );
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.click(document.querySelector('.overlay')!);
+    act(() => vi.advanceTimersByTime(300));
+
+    expect(document.querySelector('dialog')).not.toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
 
 describe('Dialog drag dismissal', () => {

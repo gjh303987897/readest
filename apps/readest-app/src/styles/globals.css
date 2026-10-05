@@ -89,7 +89,7 @@ body {
   }
 
   .dialog-exit {
-    animation: dialogExit 0.2s cubic-bezier(0.4, 0, 1, 1);
+    animation: dialogExit 0.2s cubic-bezier(0.4, 0, 1, 1) forwards;
   }
 
   @keyframes dialogEnter {
@@ -120,7 +120,7 @@ body {
   }
 
   .dialog-slide-exit {
-    animation: dialogSlideExit 0.25s cubic-bezier(0.4, 0, 1, 1);
+    animation: dialogSlideExit 0.25s cubic-bezier(0.4, 0, 1, 1) forwards;
   }
 
   @keyframes dialogSlideEnter {

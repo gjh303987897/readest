@@ -9,9 +9,15 @@ vi.mock('@/store/settingsStore', () => ({
 }));
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }));
 vi.mock('@/components/Dialog', () => ({
-  default: ({ header, children }: { header: React.ReactNode; children: React.ReactNode }) => (
+  default: ({
+    header,
+    children,
+  }: {
+    header: (onClose: () => void) => React.ReactNode;
+    children: React.ReactNode;
+  }) => (
     <div role='dialog'>
-      {header}
+      {header(() => {})}
       {children}
     </div>
   ),

@@ -24,7 +24,7 @@ interface DialogProps {
   children: ReactNode;
   snapHeight?: number;
   dismissible?: boolean;
-  header?: ReactNode;
+  header?: ReactNode | ((onClose: () => void) => ReactNode);
   title?: string;
   className?: string;
   bgClassName?: string;
@@ -67,10 +67,17 @@ const Dialog: React.FC<DialogProps> = ({
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const dragDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dismissedByDragRef = useRef(false);
+  const dismissibleRef = useRef(dismissible);
+  dismissibleRef.current = dismissible;
   const [isAnimating, setIsAnimating] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
   const [shouldRender, setShouldRender] = useState(isOpen);
   const iconSize22 = useResponsiveSize(22);
   const isMobile = !!appService?.isMobile || (!appService?.isDesktopApp && window.innerWidth < 640);
+
+  const requestClose = () => {
+    if (dismissibleRef.current && !dragDismissTimerRef.current) setIsClosing(true);
+  };
 
   const handleKeyDown = (event: KeyboardEvent | CustomEvent): boolean => {
     if (event instanceof CustomEvent) {
@@ -80,7 +87,7 @@ const Dialog: React.FC<DialogProps> = ({
       }
     } else {
       if (event.key === 'Escape') {
-        onClose();
+        requestClose();
       }
       event.stopPropagation();
     }
@@ -89,12 +96,13 @@ const Dialog: React.FC<DialogProps> = ({
 
   // Handle open/close animations
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !isClosing) {
       setShouldRender(true);
       // Trigger enter animation after render
-      requestAnimationFrame(() => {
+      const frame = requestAnimationFrame(() => {
         setIsAnimating(true);
       });
+      return () => cancelAnimationFrame(frame);
     } else {
       if (dragDismissTimerRef.current) {
         clearTimeout(dragDismissTimerRef.current);
@@ -113,11 +121,14 @@ const Dialog: React.FC<DialogProps> = ({
       // Wait for animation to complete before unmounting
       const timer = setTimeout(() => {
         setShouldRender(false);
+        if (isClosing) {
+          onClose();
+          setIsClosing(false);
+        }
       }, 250); // Match transition duration
       return () => clearTimeout(timer);
     }
-    return undefined;
-  }, [isOpen]);
+  }, [isOpen, isClosing]);
 
   useEffect(
     () => () => {
@@ -149,7 +160,7 @@ const Dialog: React.FC<DialogProps> = ({
       acquireBackKeyInterception();
       // Register with higher priority for dialogs
       unregisterNav = navigationStack.push(() => {
-        onClose();
+        requestClose();
         return true; // Consumed the back action
       }, 100);
       eventDispatcher.onSync('native-key-down', handleKeyDown);
@@ -174,7 +185,8 @@ const Dialog: React.FC<DialogProps> = ({
   }, [shouldRender]);
 
   const handleDragMove = (data: { clientY: number; deltaY: number }) => {
-    if (!dismissible || !isMobile || !dialogRef.current || dragDismissTimerRef.current) return;
+    if (!dismissible || isClosing || !isMobile || !dialogRef.current || dragDismissTimerRef.current)
+      return;
 
     const modal = dialogRef.current.querySelector('.modal-box') as HTMLElement;
     const overlay = dialogRef.current.querySelector('.overlay') as HTMLElement;
@@ -195,7 +207,8 @@ const Dialog: React.FC<DialogProps> = ({
   };
 
   const handleDragEnd = (data: { velocity: number; clientY: number }) => {
-    if (!dismissible || !isMobile || !dialogRef.current || dragDismissTimerRef.current) return;
+    if (!dismissible || isClosing || !isMobile || !dialogRef.current || dragDismissTimerRef.current)
+      return;
     const modal = dialogRef.current.querySelector('.modal-box') as HTMLElement;
     const overlay = dialogRef.current.querySelector('.overlay') as HTMLElement;
     if (!modal || !overlay) return;
@@ -272,7 +285,7 @@ const Dialog: React.FC<DialogProps> = ({
           appService?.hasRoundedWindow && 'rounded-window',
           bgClassName,
         )}
-        onDismiss={onClose}
+        onDismiss={requestClose}
       />
       <div
         className={clsx(
@@ -316,13 +329,17 @@ const Dialog: React.FC<DialogProps> = ({
         </div>
         <div className='dialog-header sticky top-1 z-10 flex shrink-0 items-center justify-between px-2 sm:pe-3 sm:ps-2'>
           {header ? (
-            header
+            typeof header === 'function' ? (
+              header(requestClose)
+            ) : (
+              header
+            )
           ) : (
             <div className='flex h-11 w-full items-center justify-between'>
               <button
                 aria-label={_('Close')}
                 aria-hidden={!shouldRender}
-                onClick={onClose}
+                onClick={requestClose}
                 disabled={!dismissible}
                 className={
                   'btn btn-ghost btn-circle flex h-8 min-h-8 w-8 hover:bg-transparent focus:outline-none disabled:bg-transparent sm:hidden'
@@ -340,7 +357,7 @@ const Dialog: React.FC<DialogProps> = ({
               <button
                 aria-label={_('Close')}
                 aria-hidden={!shouldRender}
-                onClick={onClose}
+                onClick={requestClose}
                 disabled={!dismissible}
                 className={
                   'bg-base-300/65 btn btn-ghost btn-circle ml-auto hidden h-6 min-h-6 w-6 focus:outline-none sm:flex'
