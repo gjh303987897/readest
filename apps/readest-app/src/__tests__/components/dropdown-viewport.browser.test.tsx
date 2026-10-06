@@ -98,6 +98,32 @@ afterEach(() => {
 });
 
 describe('Dropdown menu viewport layout', () => {
+  it.each([
+    'ltr',
+    'rtl',
+  ] as const)('keeps the pointer aligned after clamping in %s', async (direction) => {
+    renderMenu(['From Local File', 'From OPDS Catalog'], {
+      anchorLeft: direction === 'ltr' ? LEFT_ANCHOR_LEFT : RIGHT_ANCHOR_LEFT,
+      direction,
+      menuClassName: 'w-56 border',
+    });
+    const menu = openMenu();
+    menu.classList.remove('no-triangle');
+    await expectMenuWithinViewport();
+    const menuRect = menu.getBoundingClientRect();
+    const toggle = screen.getByRole('button', { name: 'Test Menu' }).getBoundingClientRect();
+    const arrow = getComputedStyle(menu, '::before');
+    expect(
+      Math.abs(
+        menuRect.left +
+          menu.clientLeft +
+          Number.parseFloat(arrow.left) -
+          toggle.left -
+          toggle.width / 2,
+      ),
+    ).toBeLessThan(1);
+  });
+
   it('keeps the menu adjacent to its toggle in the DOM for assistive tech', () => {
     renderMenu(['Показать недавно прочитанные']);
 

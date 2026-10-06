@@ -84,6 +84,7 @@ const LibraryPage = () => {
   const [importing, setImporting] = useState(false);
   const [busyBookHash, setBusyBookHash] = useState<string | null>(null);
   const [isUnlockDialogOpen, setUnlockDialogOpen] = useState(false);
+  const [pendingPrivacyBook, setPendingPrivacyBook] = useState<Book | null>(null);
   const [isOpdsDialogOpen, setOpdsDialogOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
@@ -324,10 +325,32 @@ const LibraryPage = () => {
   };
 
   const handlePrivacyToggle = async (book: Book) => {
-    if (hiddenBookHashes.includes(book.hash)) {
-      await unhideBook(book.hash);
-    } else {
-      await hideBook(book.hash);
+    if (busyBookHash) return;
+    const privacy = usePrivacyStore.getState();
+    if (!privacy.encryptionKey) {
+      setPendingPrivacyBook(book);
+      setUnlockDialogOpen(true);
+      return;
+    }
+    const wasPrivate = privacy.hiddenBookHashes.includes(book.hash);
+    setBusyBookHash(book.hash);
+    try {
+      if (wasPrivate) await unhideBook(book.hash);
+      else await hideBook(book.hash);
+      if (usePrivacyStore.getState().isBookHidden(book.hash) === wasPrivate) {
+        notifyError(_('Failed to update book privacy'));
+        return;
+      }
+      eventDispatcher.dispatch('toast', {
+        type: 'info',
+        message: wasPrivate
+          ? _('Book removed from Privacy Mode')
+          : _('Book will be hidden when Privacy Mode is locked'),
+      });
+    } catch {
+      notifyError(_('Failed to update book privacy'));
+    } finally {
+      setBusyBookHash(null);
     }
   };
 
@@ -673,7 +696,16 @@ const LibraryPage = () => {
         onClose={() => setOpdsDialogOpen(false)}
         onImportFiles={importOpdsFiles}
       />
-      <PrivacyUnlockDialog isOpen={isUnlockDialogOpen} onClose={() => setUnlockDialogOpen(false)} />
+      <PrivacyUnlockDialog
+        isOpen={isUnlockDialogOpen}
+        onClose={() => {
+          setUnlockDialogOpen(false);
+          setPendingPrivacyBook(null);
+        }}
+        onUnlocked={() => {
+          if (pendingPrivacyBook) void handlePrivacyToggle(pendingPrivacyBook);
+        }}
+      />
       <Toast />
     </main>
   );

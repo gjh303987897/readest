@@ -353,6 +353,28 @@ foliate-fxl {
   left: 20px;
 }
 
+.dropdown-content[data-dropdown-anchored]::before,
+.dropdown-content[data-dropdown-anchored]::after {
+  left: var(--dropdown-arrow-x);
+  right: auto;
+  transform: translateX(-50%);
+}
+
+.dropdown-content[data-dropdown-anchored='above']::before,
+.dropdown-content[data-dropdown-anchored='above']::after {
+  top: auto;
+  bottom: -12px;
+  transform: translateX(-50%) rotate(180deg);
+}
+
+.dropdown-content[data-dropdown-anchored='above']::after {
+  bottom: -14px;
+}
+
+.dropdown-content.bordercolor-content[data-dropdown-anchored='above']::after {
+  bottom: -11px;
+}
+
 .ui-rtl .dropdown-end > :where(.dropdown-content) {
   inset-inline-end: auto;
   inset-inline-start: 0;

@@ -99,6 +99,9 @@ const Dropdown: React.FC<DropdownProps> = ({
       content.style.transform = '';
       content.style.top = '';
       content.style.bottom = '';
+      content.style.marginBottom = '';
+      const toggleButton = containerRef.current?.querySelector('button');
+      const buttonRect = toggleButton?.getBoundingClientRect();
       const rect = content.getBoundingClientRect();
       let dx = 0;
       let dy = 0;
@@ -114,9 +117,7 @@ const Dropdown: React.FC<DropdownProps> = ({
       // Vertical clamping - check if menu extends below viewport
       if (rect.bottom > window.innerHeight - MENU_VIEWPORT_PADDING) {
         // Try flipping to top
-        const toggleButton = containerRef.current?.querySelector('button');
-        if (toggleButton) {
-          const buttonRect = toggleButton.getBoundingClientRect();
+        if (buttonRect) {
           const spaceAbove = buttonRect.top - MENU_VIEWPORT_PADDING;
           const spaceBelow = window.innerHeight - buttonRect.bottom - MENU_VIEWPORT_PADDING;
 
@@ -135,6 +136,13 @@ const Dropdown: React.FC<DropdownProps> = ({
       if (dx !== 0 || dy !== 0) {
         content.style.transform = `translate(${dx}px, ${dy}px)`;
       }
+      if (buttonRect) {
+        content.style.setProperty(
+          '--dropdown-arrow-x',
+          `${buttonRect.left + buttonRect.width / 2 - rect.left - dx - content.clientLeft}px`,
+        );
+        content.dataset['dropdownAnchored'] = content.style.bottom === '100%' ? 'above' : 'below';
+      }
     };
     clamp();
     window.addEventListener('resize', clamp);
@@ -146,6 +154,9 @@ const Dropdown: React.FC<DropdownProps> = ({
       content.style.transform = '';
       content.style.top = '';
       content.style.bottom = '';
+      content.style.marginBottom = '';
+      content.style.removeProperty('--dropdown-arrow-x');
+      delete content.dataset['dropdownAnchored'];
     };
   }, [isOpen]);
 

@@ -8,7 +8,10 @@ vi.mock('@/hooks/useTranslation', () => ({
   useTranslation: () => (s: string) => s,
 }));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 // Simulates the browser behavior where pressing Enter/Space on a focused
 // <button> fires both a keydown event and a click event. JSDOM does not
@@ -22,7 +25,7 @@ const renderDropdown = () =>
   render(
     <DropdownProvider>
       <Dropdown label='Test Menu' toggleButton={<span>Toggle</span>} showTooltip={false}>
-        <div>
+        <div className='dropdown-content'>
           <button type='button'>Menu Item</button>
         </div>
       </Dropdown>
@@ -90,5 +93,40 @@ describe('Dropdown keyboard activation', () => {
     } finally {
       window.removeEventListener('keydown', onWindowKeyDown);
     }
+  });
+});
+
+describe('Dropdown pointer alignment', () => {
+  it.each([false, true])('points at the toggle after viewport clamping (%s)', (clamped) => {
+    const left = clamped ? window.innerWidth - 150 : 100;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.classList.contains('dropdown-toggle')
+        ? new DOMRect(left + 100, 20, 32, 32)
+        : new DOMRect(left, 60, 200, 100);
+    });
+    renderDropdown();
+    fireEvent.click(screen.getByRole('button', { name: 'Test Menu' }));
+    const menu = document.querySelector<HTMLElement>('.dropdown-content')!;
+    const dx = clamped ? -66 : 0;
+    expect(menu.style.getPropertyValue('--dropdown-arrow-x')).toBe(`${116 - dx}px`);
+    expect(menu.dataset['dropdownAnchored']).toBe('below');
+  });
+
+  it('moves the pointer to the bottom when the menu flips above its toggle', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return this.classList.contains('dropdown-toggle')
+        ? new DOMRect(200, window.innerHeight - 60, 32, 32)
+        : new DOMRect(100, window.innerHeight - 20, 200, 100);
+    });
+    renderDropdown();
+    fireEvent.click(screen.getByRole('button', { name: 'Test Menu' }));
+    const menu = document.querySelector<HTMLElement>('.dropdown-content')!;
+    expect(menu.style.bottom).toBe('100%');
+    expect(menu.dataset['dropdownAnchored']).toBe('above');
+    expect(menu.style.getPropertyValue('--dropdown-arrow-x')).toBe('116px');
   });
 });
