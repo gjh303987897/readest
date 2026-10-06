@@ -348,7 +348,7 @@ const LibraryPage = () => {
 
         <div
           className={clsx(
-            'exclude-title-bar-mousedown pointer-events-none relative z-40 mx-auto flex h-9 min-w-9 flex-1 justify-center',
+            'exclude-title-bar-mousedown pointer-events-none relative z-40 ms-auto flex h-9 min-w-9 max-w-md flex-1 justify-end',
             isSearchExpanded &&
               'max-sm:absolute max-sm:start-4 max-sm:top-1/2 max-sm:-translate-y-1/2',
             isSearchExpanded && (showWindowControls ? 'max-sm:end-36' : 'max-sm:end-4'),
@@ -356,7 +356,7 @@ const LibraryPage = () => {
         >
           <div
             className={clsx(
-              'library-search eink-bordered pointer-events-auto flex h-9 max-w-md items-center overflow-hidden rounded border not-eink:transition-[width] not-eink:duration-200 not-eink:ease-out motion-reduce:transition-none',
+              'library-search eink-bordered pointer-events-auto flex h-9 max-w-md items-center overflow-hidden rounded border not-eink:transition-[width] not-eink:duration-200 not-eink:ease-out motion-reduce:!transition-none',
               isSearchExpanded
                 ? 'bg-base-200 border-base-300 focus-within:ring-primary w-full focus-within:ring-1'
                 : 'w-9 border-transparent bg-transparent',
@@ -391,7 +391,7 @@ const LibraryPage = () => {
                 if (event.key === 'Escape') closeSearch();
               }}
               className={clsx(
-                'min-w-0 flex-1 bg-transparent text-sm outline-none not-eink:transition-opacity not-eink:duration-150 motion-reduce:transition-none',
+                'min-w-0 flex-1 bg-transparent text-sm outline-none not-eink:transition-opacity not-eink:duration-150 motion-reduce:!transition-none',
                 !isSearchExpanded && 'pointer-events-none opacity-0',
               )}
               aria-label={_('Search Books')}
