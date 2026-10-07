@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { useEnv } from '@/context/EnvContext';
@@ -190,11 +190,26 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
     return false;
   };
 
-  const handleCloseBooks = throttle(async () => {
+  const closeBooksRef = useRef<() => Promise<void>>(async () => {});
+  closeBooksRef.current = async () => {
     const settings = useSettingsStore.getState().settings;
     await Promise.all(bookKeys.map(async (key) => await saveConfigAndCloseBook(key)));
     await saveSettings(envConfig, settings);
-  }, 200);
+  };
+  const handleCloseBooks = useMemo(() => throttle(() => closeBooksRef.current(), 200), []);
+  useEffect(() => () => handleCloseBooks.cancel(), [handleCloseBooks]);
+
+  const bookData = bookKeys?.length ? getBookData(bookKeys[0]!) : null;
+  const viewSettings = bookKeys?.length ? getViewSettings(bookKeys[0]!) : null;
+  const bookReady = Boolean(bookData?.book && bookData.bookDoc && viewSettings);
+  useEffect(() => {
+    if (!bookKeys?.length || bookReady || errorLoading) {
+      setLoading(false);
+      return;
+    }
+    const timer = setTimeout(() => setLoading(true), 200);
+    return () => clearTimeout(timer);
+  }, [bookKeys?.length, bookReady, errorLoading]);
 
   const handleCloseBooksToLibrary = async () => {
     handleCloseBooks();
@@ -238,10 +253,7 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
   };
 
   if (!bookKeys || bookKeys.length === 0) return null;
-  const bookData = getBookData(bookKeys[0]!);
-  const viewSettings = getViewSettings(bookKeys[0]!);
-  if (!bookData || !bookData.book || !bookData.bookDoc || !viewSettings) {
-    setTimeout(() => setLoading(true), 200);
+  if (!bookReady) {
     return (
       loading &&
       !errorLoading && (

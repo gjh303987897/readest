@@ -232,20 +232,24 @@ export abstract class BaseAppService implements AppService {
     });
   }
 
-  async deleteBook(book: Book, deleteAction: DeleteAction): Promise<void> {
-    return CloudSvc.deleteBook(this.fs, book, deleteAction);
+  async deleteBook(book: Book, deleteAction: DeleteAction, signal?: AbortSignal): Promise<void> {
+    return CloudSvc.deleteBook(this.fs, book, deleteAction, signal);
   }
 
-  async uploadBook(book: Book, onProgress?: ProgressHandler): Promise<void> {
-    return CloudSvc.uploadBook(this.fs, this.resolveFilePath.bind(this), book, onProgress);
+  async uploadBook(book: Book, onProgress?: ProgressHandler, signal?: AbortSignal): Promise<void> {
+    return CloudSvc.uploadBook(this.fs, this.resolveFilePath.bind(this), book, onProgress, signal);
   }
 
   async downloadCloudFile(lfp: string, cfp: string, onProgress: ProgressHandler) {
     return CloudSvc.downloadCloudFile(this, this.localBooksDir, lfp, cfp, onProgress);
   }
 
-  async downloadBookCovers(books: Book[]): Promise<void> {
-    return CloudSvc.downloadBookCovers(this, this.fs, this.localBooksDir, books);
+  async downloadBookCovers(
+    books: Book[],
+    _redownload = false,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return CloudSvc.downloadBookCovers(this, this.fs, this.localBooksDir, books, signal);
   }
 
   async downloadBook(
@@ -253,6 +257,7 @@ export abstract class BaseAppService implements AppService {
     onlyCover = false,
     redownload = false,
     onProgress?: ProgressHandler,
+    signal?: AbortSignal,
   ): Promise<void> {
     return CloudSvc.downloadBook(
       this,
@@ -262,6 +267,7 @@ export abstract class BaseAppService implements AppService {
       onlyCover,
       redownload,
       onProgress,
+      signal,
     );
   }
 
@@ -314,8 +320,8 @@ export abstract class BaseAppService implements AppService {
       // rejection crash (Sentry READEST-A). Re-request the permission through
       // the same flow used at import time and retry once. Only prompt once per
       // session so background saves don't repeatedly yank the user to system
-      // settings; after that a still-denied save is logged, not crashed —
-      // the user was already shown the All Files Access screen.
+      // settings. A denied write must still reject so callers do not publish
+      // a successful save or discard their pending changes.
       if (!this.isAndroidApp || !isStoragePermissionError(error)) {
         throw error;
       }
@@ -326,6 +332,7 @@ export abstract class BaseAppService implements AppService {
         }
       }
       console.warn('[library] not saved: storage permission not granted', error);
+      throw error;
     }
   }
 }

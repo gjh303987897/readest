@@ -140,6 +140,11 @@ const BookCover: React.FC<BookCoverProps> = memo<BookCoverProps>(
       prevProps.book.coverImageUrl === nextProps.book.coverImageUrl &&
       prevProps.book.metadata?.coverImageUrl === nextProps.book.metadata?.coverImageUrl &&
       prevProps.book.updatedAt === nextProps.book.updatedAt &&
+      prevProps.book.title === nextProps.book.title &&
+      prevProps.book.author === nextProps.book.author &&
+      prevProps.book.metadata?.author === nextProps.book.metadata?.author &&
+      prevProps.onImageError === nextProps.onImageError &&
+      prevProps.onAspectRatioChange === nextProps.onAspectRatioChange &&
       prevProps.mode === nextProps.mode &&
       prevProps.coverFit === nextProps.coverFit &&
       prevProps.isPreview === nextProps.isPreview &&

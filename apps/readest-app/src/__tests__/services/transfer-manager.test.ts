@@ -15,6 +15,7 @@ vi.mock('@/utils/event', () => ({
 import { transferManager } from '@/services/transferManager';
 import { eventDispatcher } from '@/utils/event';
 import type { Book } from '@/types/book';
+import type { ProgressHandler } from '@/utils/transfer';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 function makeBook(overrides: Partial<Book> = {}): Book {
@@ -92,6 +93,63 @@ const translationFn = (key: string, params?: Record<string, string | number>) =>
   }
   return key;
 };
+
+test.each([
+  'upload',
+  'download',
+  'delete',
+] as const)('keeps cancelled %s results out of the library', async (type) => {
+  const book = makeBook({ uploadedAt: 123, downloadedAt: 456 });
+  const original = { ...book };
+  let finish!: () => void;
+  const app = makeAppService();
+  const method = `${type}Book`;
+  (app[method] as Mock).mockImplementation(
+    (workingBook: Book) =>
+      new Promise<void>((resolve) => {
+        finish = () => {
+          workingBook.uploadedAt = null;
+          workingBook.downloadedAt = 999;
+          resolve();
+        };
+      }),
+  );
+  const update = vi.fn().mockResolvedValue(undefined);
+  await transferManager.initialize(app as never, () => [book], update, translationFn);
+  const id =
+    type === 'upload'
+      ? transferManager.queueUpload(book)!
+      : type === 'download'
+        ? transferManager.queueDownload(book)!
+        : transferManager.queueDelete(book)!;
+  transferManager.cancelTransfer(id);
+  finish();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(useTransferStore.getState().transfers[id]?.status).toBe('cancelled');
+  expect(book).toEqual(original);
+  expect(update).not.toHaveBeenCalled();
+  expect(eventDispatcher.dispatch).not.toHaveBeenCalled();
+});
+test('drops already buffered progress after cancellation', async () => {
+  const app = makeAppService(),
+    book = makeBook();
+  let progress!: ProgressHandler, finish!: () => void;
+  (app['uploadBook'] as Mock).mockImplementation((_book: Book, handler: ProgressHandler) => {
+    progress = handler;
+    return new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+  });
+  await transferManager.initialize(app as never, () => [book], vi.fn(), translationFn);
+  const id = transferManager.queueUpload(book)!;
+  progress({ progress: 1, total: 10, transferSpeed: 1 });
+  progress({ progress: 9, total: 10, transferSpeed: 1 });
+  transferManager.cancelTransfer(id);
+  await vi.advanceTimersByTimeAsync(200);
+  expect(useTransferStore.getState().transfers[id]?.progress).toBe(10);
+  finish();
+  await vi.advanceTimersByTimeAsync(0);
+});
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });

@@ -140,7 +140,7 @@ export const useBooksSync = () => {
         for (let i = 0; i < downloads.length; i += 20) {
           if (signal.aborted) return;
           const batch = downloads.slice(i, i + 20);
-          await appService.downloadBookCovers(batch);
+          await appService.downloadBookCovers(batch, false, signal);
           if (signal.aborted) return;
           for (const book of batch) {
             refreshed.set(book.hash, {

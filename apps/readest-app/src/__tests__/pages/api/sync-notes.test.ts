@@ -46,7 +46,7 @@ vi.mock('@/utils/access', () => ({
   validateUserAndToken: async () => ({ user: { id: 'user-1' }, token: 'token' }),
 }));
 
-import { GET, POST } from '@/pages/api/sync';
+import { GET, POST, quoteFilterValue } from '@/pages/api/sync';
 
 const request = (url: string, init?: RequestInit) =>
   new Request(url, {
@@ -74,6 +74,24 @@ beforeEach(() => {
   tableCalls.length = 0;
   methodCalls.length = 0;
   fromMock.mockClear();
+});
+
+it('treats delimiters, quotes and backslashes in note IDs as one filter literal', async () => {
+  const id = 'x"\\),book_hash.neq.none,and(user_id.eq.other';
+  const response = await POST(
+    request('https://reader.example.com/api/sync', {
+      method: 'POST',
+      body: JSON.stringify({
+        notes: [{ bookHash: dbNote.book_hash, id, type: 'bookmark', cfi: dbNote.cfi }],
+      }),
+    }),
+  );
+  expect(response.status).toBe(200);
+  const filter = methodCalls.find((call) => call.method === 'or')?.args[0];
+  expect(filter).toBe(
+    `and(user_id.eq."user-1",book_hash.eq."${dbNote.book_hash}",id.eq.${quoteFilterValue(id)})`,
+  );
+  expect(quoteFilterValue('a"\\b,c)')).toBe('"a\\"\\\\b,c)"');
 });
 
 describe('/api/sync notes', () => {

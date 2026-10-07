@@ -6,11 +6,8 @@ import { useTransferStore, TransferType, isFailedLikeTransfer } from '@/store/tr
 import { transferManager } from '@/services/transferManager';
 import { Book } from '@/types/book';
 
-// The `libraryLoaded = true` default lets surfaces like SettingsMenu and
-// TransferQueuePanel initialize the manager on mount, before settings
-// hydrate. That is safe: the manager defers book uploads until
-// settings.version is truthy and reconciles them against the selected
-// cloud sync provider once it is (see transferManager.isSettingsLoaded).
+// Settings and the transfer panel can initialize the shared manager on mount.
+// Only the delayed initialization belongs to this hook's lifecycle.
 export function useTransferQueue(libraryLoaded = true, delayInit = 0) {
   const { envConfig, appService } = useEnv();
   const _ = useTranslation();
@@ -33,10 +30,12 @@ export function useTransferQueue(libraryLoaded = true, delayInit = 0) {
 
     // Initialize transfer manager only when library is loaded
     if (libraryLoaded) {
-      setTimeout(() => {
-        initManager();
+      const timer = setTimeout(() => {
+        void initManager().catch((error) => console.warn('Failed to initialize transfers', error));
       }, delayInit);
+      return () => clearTimeout(timer);
     }
+    return;
   }, [appService, envConfig, libraryLoaded, delayInit, _]);
 
   const queueUpload = useCallback((book: Book, priority?: number) => {

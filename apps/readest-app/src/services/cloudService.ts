@@ -22,7 +22,9 @@ export async function deleteBook(
   fs: FileSystem,
   book: Book,
   deleteAction: DeleteAction,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   if (deleteAction === 'local' || deleteAction === 'both' || deleteAction === 'purge') {
     const source = await resolveBookContentSource(fs, book);
     // Only remove files Readest itself created. A 'managed' source lives under
@@ -68,11 +70,13 @@ export async function deleteBook(
     for (const fp of fps) {
       const cfp = `${CLOUD_BOOKS_SUBDIR}/${fp}`;
       try {
-        await deleteCloudFile(cfp);
+        await deleteCloudFile(cfp, signal);
       } catch (error) {
+        if (signal?.aborted) throw error;
         console.log('Failed to delete uploaded file:', error);
       }
     }
+    signal?.throwIfAborted();
     book.uploadedAt = null;
   }
 }
@@ -85,14 +89,17 @@ export async function uploadFileToCloud(
   base: BaseDir,
   handleProgress: ProgressHandler,
   hash: string,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   console.log('Uploading file:', lfp, 'to', cfp);
   const file = await fs.openFile(lfp, base, cfp);
-  const localFullpath = await resolveFilePath(lfp, base);
-  await uploadFile(file, localFullpath, handleProgress, hash);
-  const f = file as ClosableFile;
-  if (f && f.close) {
-    await f.close();
+  try {
+    const localFullpath = await resolveFilePath(lfp, base);
+    await uploadFile(file, localFullpath, handleProgress, hash, signal);
+  } finally {
+    const f = file as ClosableFile;
+    if (f && f.close) await f.close();
   }
 }
 
@@ -101,7 +108,9 @@ export async function uploadBook(
   resolveFilePath: (path: string, base: BaseDir) => Promise<string>,
   book: Book,
   onProgress?: ProgressHandler,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   const completedFiles = { count: 0 };
   const coverExist = await fs.exists(getCoverFilename(book), 'Books');
 
@@ -126,7 +135,16 @@ export async function uploadBook(
   if (coverExist) {
     const lfp = getCoverFilename(book);
     const cfp = `${CLOUD_BOOKS_SUBDIR}/${getCoverFilename(book)}`;
-    await uploadFileToCloud(fs, resolveFilePath, lfp, cfp, 'Books', handleProgress, book.hash);
+    await uploadFileToCloud(
+      fs,
+      resolveFilePath,
+      lfp,
+      cfp,
+      'Books',
+      handleProgress,
+      book.hash,
+      signal,
+    );
     completedFiles.count++;
   }
 
@@ -139,9 +157,11 @@ export async function uploadBook(
     bookSource.base,
     handleProgress,
     book.hash,
+    signal,
   );
   completedFiles.count++;
 
+  signal?.throwIfAborted();
   book.deletedAt = null;
   book.updatedAt = Date.now();
   book.uploadedAt = Date.now();
@@ -155,10 +175,11 @@ export async function downloadCloudFile(
   lfp: string,
   cfp: string,
   onProgress: ProgressHandler,
+  signal?: AbortSignal,
 ): Promise<void> {
   console.log('Downloading file:', cfp, 'to', lfp);
   const dstPath = `${localBooksDir}/${lfp}`;
-  await downloadFile({ appService, cfp, dst: dstPath, onProgress });
+  await downloadFile({ appService, cfp, dst: dstPath, onProgress, signal });
 }
 
 export async function downloadBookCovers(
@@ -166,7 +187,9 @@ export async function downloadBookCovers(
   fs: FileSystem,
   localBooksDir: string,
   books: Book[],
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   const booksLfps = new Map(
     books.map((book) => {
       const lfp = getCoverFilename(book);
@@ -177,9 +200,11 @@ export async function downloadBookCovers(
     lfp: getCoverFilename(book),
     cfp: `${CLOUD_BOOKS_SUBDIR}/${getCoverFilename(book)}`,
   }));
-  const downloadUrls = await batchGetDownloadUrls(filePaths);
+  const downloadUrls = await batchGetDownloadUrls(filePaths, signal);
+  signal?.throwIfAborted();
   await Promise.all(
     books.map(async (book) => {
+      signal?.throwIfAborted();
       if (!(await fs.exists(getDir(book), 'Books'))) {
         await fs.createDir(getDir(book), 'Books');
       }
@@ -190,12 +215,14 @@ export async function downloadBookCovers(
       try {
         const dst = `${localBooksDir}/${file.lfp}`;
         if (!file.downloadUrl) return;
-        await downloadFile({ appService, dst, cfp: file.cfp, url: file.downloadUrl });
+        await downloadFile({ appService, dst, cfp: file.cfp, url: file.downloadUrl, signal });
+        signal?.throwIfAborted();
         const book = booksLfps.get(file.lfp);
         if (book && !book.coverDownloadedAt) {
           book.coverDownloadedAt = Date.now();
         }
       } catch (error) {
+        if (signal?.aborted) throw error;
         console.log(`Failed to download cover file for book: '${file.lfp}'`, error);
       }
     }),
@@ -210,7 +237,9 @@ export async function downloadBook(
   onlyCover: boolean = false,
   redownload: boolean = false,
   onProgress?: ProgressHandler,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   let bookDownloaded = false;
   let bookCoverDownloaded = false;
   const completedFiles = { count: 0 };
@@ -235,10 +264,11 @@ export async function downloadBook(
     if (needDownCover) {
       const lfp = getCoverFilename(book);
       const cfp = `${CLOUD_BOOKS_SUBDIR}/${lfp}`;
-      await downloadCloudFile(appService, localBooksDir, lfp, cfp, handleProgress);
+      await downloadCloudFile(appService, localBooksDir, lfp, cfp, handleProgress, signal);
       bookCoverDownloaded = true;
     }
   } catch (error) {
+    if (signal?.aborted) throw error;
     // don't throw error here since some books may not have cover images at all
     console.log(`Failed to download cover file for book: '${book.title}'`, error);
   } finally {
@@ -250,11 +280,12 @@ export async function downloadBook(
   if (needDownBook) {
     const lfp = getLocalBookFilename(book);
     const cfp = `${CLOUD_BOOKS_SUBDIR}/${getRemoteBookFilename(book)}`;
-    await downloadCloudFile(appService, localBooksDir, lfp, cfp, handleProgress);
+    await downloadCloudFile(appService, localBooksDir, lfp, cfp, handleProgress, signal);
     const localFullpath = `${localBooksDir}/${lfp}`;
     bookDownloaded = await fs.exists(localFullpath, 'None');
     completedFiles.count++;
   }
+  signal?.throwIfAborted();
   // some books may not have cover image, so we need to check if the book is downloaded
   if (bookDownloaded || (!onlyCover && !needDownBook)) {
     book.downloadedAt = Date.now();

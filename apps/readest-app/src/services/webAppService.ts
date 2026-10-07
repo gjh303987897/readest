@@ -175,8 +175,9 @@ const indexedDBFileSystem: FileSystem = {
 
       request.onsuccess = () => {
         const files = request.result as { path: string }[];
+        const directory = fp.replace(/\/+$/, '');
         files.forEach((file) => {
-          if (file.path.startsWith(fp)) {
+          if (!directory || file.path === directory || file.path.startsWith(`${directory}/`)) {
             store.delete(file.path);
           }
         });

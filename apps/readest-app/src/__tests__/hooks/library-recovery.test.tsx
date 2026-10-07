@@ -79,6 +79,27 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it('aborts superseded cover work and publishes only the latest sync result', async () => {
+  vi.useFakeTimers();
+  const first = gate();
+  useLibraryStore.setState({ libraryLoaded: true, library: [] });
+  fixture.sync.syncedBooks = [book('first', { uploadedAt: 1 })];
+  fixture.service.downloadBookCovers
+    .mockImplementationOnce(() => first.promise)
+    .mockResolvedValue(undefined);
+  const { rerender } = renderHook(useBooksSync);
+  const oldSignal = fixture.service.downloadBookCovers.mock.calls[0]![2] as AbortSignal;
+  expect(oldSignal.aborted).toBe(false);
+  fixture.sync.syncedBooks = [book('second', { uploadedAt: 1 })];
+  rerender();
+  expect(oldSignal.aborted).toBe(true);
+  await act(async () => vi.advanceTimersByTimeAsync(10000));
+  first.resolve();
+  await act(async () => {});
+  expect(fixture.service.saveLibraryBooks).toHaveBeenCalledTimes(1);
+  expect(useLibraryStore.getState().library.map((entry) => entry.hash)).toEqual(['second']);
+});
+
 describe('library asynchronous recovery', () => {
   it('reports initialization failure and successfully retries', async () => {
     fixture.service.loadSettings.mockRejectedValueOnce(new Error('disk failure'));

@@ -20,13 +20,20 @@ export const createProgressHandler = (
   onProgress?: ProgressHandler,
 ) => {
   return (progress: ProgressPayload) => {
-    const fileProgress = progress.progress / progress.total;
-    const overallProgress = ((completedFilesRef.count + fileProgress) / totalFiles) * 100;
+    const fileProgress =
+      progress.total > 0 && Number.isFinite(progress.total) && Number.isFinite(progress.progress)
+        ? Math.max(0, Math.min(1, progress.progress / progress.total))
+        : 0;
+    const completed = Number.isFinite(completedFilesRef.count) ? completedFilesRef.count : 0;
+    const overallProgress =
+      totalFiles > 0 && Number.isFinite(totalFiles)
+        ? Math.max(0, Math.min(100, ((completed + fileProgress) / totalFiles) * 100))
+        : 0;
 
     if (onProgress) {
       onProgress({
         progress: overallProgress,
-        total: 100,
+        total: progress.total > 0 && Number.isFinite(progress.total) && totalFiles > 0 ? 100 : 0,
         transferSpeed: progress.transferSpeed,
       });
     }
@@ -38,10 +45,13 @@ export const uploadFile = async (
   fileFullPath: string,
   onProgress?: ProgressHandler,
   bookHash?: string,
+  signal?: AbortSignal,
 ) => {
   try {
+    signal?.throwIfAborted();
     const response = await fetchWithAuth(getStorageEndpoint('upload'), {
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -53,12 +63,15 @@ export const uploadFile = async (
     });
 
     const { uploadUrl }: { uploadUrl: string } = await response.json();
+    signal?.throwIfAborted();
     if (isWebAppPlatform()) {
-      await webUpload(file, uploadUrl, onProgress);
+      await webUpload(file, uploadUrl, onProgress, signal);
     } else {
       await tauriUpload(uploadUrl, fileFullPath, 'PUT', onProgress);
     }
+    signal?.throwIfAborted();
   } catch (error) {
+    if (signal?.aborted) throw error;
     console.error('File upload failed:', error);
     if (error instanceof Error) {
       throw error;
@@ -67,8 +80,12 @@ export const uploadFile = async (
   }
 };
 
-export const batchGetDownloadUrls = async (files: { lfp: string; cfp: string }[]) => {
+export const batchGetDownloadUrls = async (
+  files: { lfp: string; cfp: string }[],
+  signal?: AbortSignal,
+) => {
   try {
+    signal?.throwIfAborted();
     const userId = await getUserID();
     if (!userId) {
       throw new Error('Not authenticated');
@@ -77,6 +94,7 @@ export const batchGetDownloadUrls = async (files: { lfp: string; cfp: string }[]
     const fileKeys = filePaths.map((path) => `${userId}/${path}`);
     const response = await fetchWithAuth(getStorageEndpoint('download'), {
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
       },
@@ -93,6 +111,7 @@ export const batchGetDownloadUrls = async (files: { lfp: string; cfp: string }[]
       };
     });
   } catch (error) {
+    if (signal?.aborted) throw error;
     console.error('Batch get download URLs failed:', error);
     throw new Error('Batch get download URLs failed');
   }
@@ -107,6 +126,7 @@ type DownloadFileParams = {
   singleThreaded?: boolean;
   skipSslVerification?: boolean;
   onProgress?: ProgressHandler;
+  signal?: AbortSignal;
 };
 
 export const downloadFile = async ({
@@ -118,8 +138,10 @@ export const downloadFile = async ({
   singleThreaded,
   skipSslVerification,
   onProgress,
+  signal,
 }: DownloadFileParams) => {
   try {
+    signal?.throwIfAborted();
     let downloadUrl = url;
     if (!downloadUrl) {
       const userId = await getUserID();
@@ -131,6 +153,7 @@ export const downloadFile = async ({
         `${getStorageEndpoint('download')}?fileKey=${encodeURIComponent(fileKey)}`,
         {
           method: 'GET',
+          signal,
         },
       );
 
@@ -142,16 +165,20 @@ export const downloadFile = async ({
       throw new Error('No download URL available');
     }
 
+    signal?.throwIfAborted();
+
     if (isWebAppPlatform()) {
       const { headers: responseHeaders, blob } = await webDownload(
         downloadUrl,
         onProgress,
         headers,
+        signal,
       );
+      signal?.throwIfAborted();
       await appService.writeFile(dst, 'None', await blob.arrayBuffer());
       return responseHeaders;
     } else {
-      return await tauriDownload(
+      const responseHeaders = await tauriDownload(
         downloadUrl,
         dst,
         onProgress,
@@ -160,15 +187,19 @@ export const downloadFile = async ({
         singleThreaded,
         skipSslVerification,
       );
+      signal?.throwIfAborted();
+      return responseHeaders;
     }
   } catch (error) {
+    if (signal?.aborted) throw error;
     console.error(`File '${dst}' download failed:`, error);
     throw error;
   }
 };
 
-export const deleteFile = async (filePath: string) => {
+export const deleteFile = async (filePath: string, signal?: AbortSignal) => {
   try {
+    signal?.throwIfAborted();
     const userId = await getUserID();
     if (!userId) {
       throw new Error('Not authenticated');
@@ -177,8 +208,10 @@ export const deleteFile = async (filePath: string) => {
     const fileKey = `${userId}/${filePath}`;
     await fetchWithAuth(`${getStorageEndpoint('delete')}?fileKey=${encodeURIComponent(fileKey)}`, {
       method: 'DELETE',
+      signal,
     });
   } catch (error) {
+    if (signal?.aborted) throw error;
     // Best-effort cloud cleanup: removing the remote copy is non-critical and
     // callers dispatch this without awaiting, so throwing here surfaces as an
     // unhandled promise rejection (Sentry READEST-5). Log and swallow instead.

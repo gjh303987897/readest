@@ -23,9 +23,13 @@ export const fetchWithAuth = async (url: string, options: RequestInit) => {
   const response = await fetch(url, { ...options, headers });
 
   if (!response.ok) {
-    const errorData = await response.json();
-    console.error('Error:', errorData.error || response.statusText);
-    throw new Error(errorData.error || 'Request failed');
+    const errorData = await response.json().catch(() => null);
+    const message =
+      typeof errorData?.error === 'string' && errorData.error
+        ? errorData.error
+        : `Request failed (${response.status}${response.statusText ? ` ${response.statusText}` : ''})`;
+    console.error('Error:', message);
+    throw new Error(message);
   }
 
   return response;

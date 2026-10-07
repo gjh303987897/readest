@@ -20,6 +20,8 @@ export const useKeyDownActions = ({
   const { acquireBackKeyInterception, releaseBackKeyInterception } = useDeviceControlStore();
   const internalRef = useRef<HTMLDivElement | null>(null);
   const elementRef = providedRef || internalRef;
+  const callbacks = useRef({ onCancel, onConfirm });
+  callbacks.current = { onCancel, onConfirm };
 
   useEffect(() => {
     if (!enabled) return;
@@ -27,14 +29,14 @@ export const useKeyDownActions = ({
     const handleKeyDown = (event: KeyboardEvent | CustomEvent) => {
       if (event instanceof CustomEvent) {
         if (event.detail.keyName === 'Back') {
-          onCancel?.();
+          callbacks.current.onCancel?.();
           return true;
         }
       } else {
         if (event.key === 'Escape') {
-          onCancel?.();
+          callbacks.current.onCancel?.();
         } else if (event.key === 'Enter') {
-          onConfirm?.();
+          callbacks.current.onConfirm?.();
         }
         event.stopPropagation();
       }
@@ -43,9 +45,8 @@ export const useKeyDownActions = ({
 
     window.addEventListener('keydown', handleKeyDown);
 
-    if (elementRef.current) {
-      elementRef.current.addEventListener('keydown', handleKeyDown);
-    }
+    const element = elementRef.current;
+    element?.addEventListener('keydown', handleKeyDown);
 
     if (appService?.isAndroidApp) {
       acquireBackKeyInterception?.();
@@ -54,14 +55,20 @@ export const useKeyDownActions = ({
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
+      element?.removeEventListener('keydown', handleKeyDown);
 
       if (appService?.isAndroidApp) {
         releaseBackKeyInterception?.();
         eventDispatcher.offSync('native-key-down', handleKeyDown);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, appService?.isAndroidApp]);
+  }, [
+    enabled,
+    appService?.isAndroidApp,
+    elementRef,
+    acquireBackKeyInterception,
+    releaseBackKeyInterception,
+  ]);
 
   return internalRef;
 };

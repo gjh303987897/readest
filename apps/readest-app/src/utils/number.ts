@@ -4,29 +4,39 @@ export const localizeNumber = (num: number, language: string, isIndex = false): 
   if (!isChinese) {
     return num.toString();
   }
+  if (!Number.isSafeInteger(num)) return num.toString();
+  if (num < 0) return `-${localizeNumber(-num, language, isIndex)}`;
 
   const isTraditional = lang.includes('tw') || lang.includes('hk');
 
   const baseDigits = isTraditional ? '零壹貳叁肆伍陸柒捌玖' : '零一二三四五六七八九';
   const zeroChar = isIndex ? '〇' : '零';
   const digits = baseDigits.replace('零', zeroChar);
-  const units = isTraditional
-    ? ['', '拾', '佰', '仟', '萬', '億']
-    : ['', '十', '百', '千', '万', '亿'];
+  const units = isTraditional ? ['', '拾', '佰', '仟'] : ['', '十', '百', '千'];
+  const groupUnits = isTraditional ? ['', '萬', '億', '萬億'] : ['', '万', '亿', '万亿'];
+  if (num === 0) return zeroChar;
 
   const str = String(num);
-  const len = str.length;
   let result = '';
-  for (let i = 0; i < len; i++) {
-    const n = Number(str[i]);
-    const pos = len - i - 1;
-    if (n !== 0) {
-      result += digits[n]! + units[pos % 4]!;
-    } else if (!result.endsWith(zeroChar) && i < len - 1) {
-      result += zeroChar;
+  const groups = str.match(/\d{1,4}(?=(\d{4})*$)/g)!;
+  let skippedGroup = false;
+  for (const [index, group] of groups.entries()) {
+    const value = Number(group);
+    if (value === 0) {
+      skippedGroup = true;
+      continue;
     }
-    if (pos === 4) result += units[4];
-    if (pos === 8) result += units[5];
+    if (result && (skippedGroup || value < 1000)) result += zeroChar;
+    skippedGroup = false;
+    let groupText = '';
+    for (let i = 0; i < group.length; i++) {
+      const digit = Number(group[i]);
+      const position = group.length - i - 1;
+      if (digit) groupText += digits[digit]! + units[position]!;
+      else if (groupText && !groupText.endsWith(zeroChar)) groupText += zeroChar;
+    }
+    result +=
+      groupText.replace(new RegExp(`${zeroChar}+$`), '') + groupUnits[groups.length - index - 1]!;
   }
   result = result
     .replace(new RegExp(`${zeroChar}+$`), '')

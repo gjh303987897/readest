@@ -259,6 +259,7 @@ class TransferManager {
     store.setActiveCount(store.getActiveTransfers().length);
 
     const progressThrottle = createProgressThrottle((progress) => {
+      if (abortController.signal.aborted) return;
       const percentage = progress.total > 0 ? (progress.progress / progress.total) * 100 : 0;
       useTransferStore
         .getState()
@@ -278,6 +279,7 @@ class TransferManager {
 
     try {
       await this.executeBookTransfer(transfer, progressHandler, abortController);
+      if (abortController.signal.aborted) return;
 
       // Land the final progress value that the throttle may still be holding.
       progressThrottle.flush();
@@ -348,7 +350,9 @@ class TransferManager {
       // Drop any pending throttled progress + its trailing timer (a
       // failed/aborted transfer's stale progress must not fire after teardown).
       progressThrottle.cancel();
-      this.abortControllers.delete(transfer.id);
+      if (this.abortControllers.get(transfer.id) === abortController) {
+        this.abortControllers.delete(transfer.id);
+      }
 
       const currentStore = useTransferStore.getState();
       currentStore.setActiveCount(Math.max(0, currentStore.getActiveTransfers().length));
@@ -381,26 +385,35 @@ class TransferManager {
   private async executeBookTransfer(
     transfer: TransferItem,
     progressHandler: (p: ProgressPayload) => void,
-    _abortController: AbortController,
+    abortController: AbortController,
   ): Promise<void> {
     const _ = this._!;
     const library = this.getLibrary!();
-    const book = library.find((b) => b.hash === transfer.bookHash);
+    const originalBook = library.find((b) => b.hash === transfer.bookHash);
 
-    if (!book) {
+    if (!originalBook) {
       throw new Error(_('Book not found in library'));
     }
 
+    // Cloud services mutate their argument. Isolate late native I/O results
+    // from the live library even when the operation cannot abort mid-flight.
+    const book = { ...originalBook };
+    const signal = abortController.signal;
+    signal.throwIfAborted();
+
     if (transfer.type === 'upload') {
-      await this.appService!.uploadBook(book, progressHandler);
+      await this.appService!.uploadBook(book, progressHandler, signal);
+      signal.throwIfAborted();
       book.uploadedAt = Date.now();
       await this.updateBook!(book);
     } else if (transfer.type === 'download') {
-      await this.appService!.downloadBook(book, false, false, progressHandler);
+      await this.appService!.downloadBook(book, false, false, progressHandler, signal);
+      signal.throwIfAborted();
       book.downloadedAt = Date.now();
       await this.updateBook!(book);
     } else if (transfer.type === 'delete') {
-      await this.appService!.deleteBook(book, 'cloud');
+      await this.appService!.deleteBook(book, 'cloud', signal);
+      signal.throwIfAborted();
       await this.updateBook!(book);
     }
   }

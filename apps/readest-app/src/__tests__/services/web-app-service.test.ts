@@ -67,6 +67,49 @@ import { WebAppService } from '@/services/webAppService';
 import { isPWA } from '@/services/environment';
 import { getOSPlatform } from '@/utils/misc';
 
+test.each(['ab', 'ab/'])('removes only a directory and its descendants: %s', async (directory) => {
+  const deleted: string[] = [];
+  const files = [
+    'Readest/Books/ab',
+    'Readest/Books/ab/file.epub',
+    'Readest/Books/ab/nested/cover.png',
+    'Readest/Books/abc/file.epub',
+    'Readest/Books/ab.epub',
+  ];
+  const db = {
+    transaction: () => {
+      const tx = {
+        oncomplete: () => {},
+        objectStore: () => ({
+          getAll: () => {
+            const request = { result: files.map((path) => ({ path })), onsuccess: () => {} };
+            queueMicrotask(() => {
+              request.onsuccess();
+              queueMicrotask(() => tx.oncomplete());
+            });
+            return request;
+          },
+          delete: (path: string) => deleted.push(path),
+        }),
+      };
+      return tx;
+    },
+  };
+  vi.stubGlobal('indexedDB', {
+    open: () => {
+      const request = { result: db, onsuccess: () => {} };
+      queueMicrotask(() => request.onsuccess());
+      return request;
+    },
+  });
+  try {
+    await new WebAppService().fs.removeDir(directory, 'Books', true);
+    expect(deleted).toEqual(files.slice(0, 3));
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 // Helper: resolvePath is a module-level function, extract it for direct testing
 // We test through the WebAppService instance's fs.resolvePath
 

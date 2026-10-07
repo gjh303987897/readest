@@ -123,10 +123,17 @@ export const validateAndNormalizeDate = (dateInput: string): ValidationResult<st
       }
     }
 
-    return {
-      isValid: true,
-      value: date.toISOString(),
-    };
+    const month = cleaned.length >= 7 ? Number(cleaned.substring(5, 7)) : 1;
+    const day = cleaned.length === 10 ? Number(cleaned.substring(8, 10)) : 1;
+    if (
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() + 1 !== month ||
+      date.getUTCDate() !== day
+    ) {
+      return { isValid: false, value: null, error: 'Invalid date' };
+    }
+
+    return { isValid: true, value: date.toISOString() };
   } catch {
     return {
       isValid: false,

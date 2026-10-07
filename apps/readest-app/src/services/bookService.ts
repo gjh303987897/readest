@@ -639,9 +639,10 @@ export async function importBook(
         if (key) lookupIndex.byFilePath.set(key, indexedBook);
       }
     }
-    book.coverImageUrl = await generateCoverImageUrlFn(book);
+    const importedBook = existingBook || book;
+    importedBook.coverImageUrl = await generateCoverImageUrlFn(importedBook);
 
-    return existingBook || book;
+    return importedBook;
   } catch (error) {
     console.error('Error importing book:', error);
     throw error;

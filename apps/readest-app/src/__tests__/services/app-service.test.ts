@@ -207,12 +207,12 @@ describe('BaseAppService', () => {
       expect(LibrarySvc.saveLibraryBooks).toHaveBeenCalledTimes(2);
     });
 
-    test('on Android, does not crash when permission is denied', async () => {
+    test('on Android, rejects an unsaved library when permission is denied', async () => {
       service.isAndroidApp = true;
       vi.mocked(LibrarySvc.saveLibraryBooks).mockRejectedValue(permError());
       vi.mocked(requestStoragePermission).mockResolvedValue(false);
 
-      await expect(service.saveLibraryBooks([])).resolves.toBeUndefined();
+      await expect(service.saveLibraryBooks([])).rejects.toThrow('Permission denied');
       // No retry when the permission was declined.
       expect(LibrarySvc.saveLibraryBooks).toHaveBeenCalledTimes(1);
     });
@@ -222,8 +222,8 @@ describe('BaseAppService', () => {
       vi.mocked(LibrarySvc.saveLibraryBooks).mockRejectedValue(permError());
       vi.mocked(requestStoragePermission).mockResolvedValue(false);
 
-      await service.saveLibraryBooks([]);
-      await service.saveLibraryBooks([]);
+      await expect(service.saveLibraryBooks([])).rejects.toThrow('Permission denied');
+      await expect(service.saveLibraryBooks([])).rejects.toThrow('Permission denied');
       expect(requestStoragePermission).toHaveBeenCalledTimes(1);
     });
 
@@ -233,6 +233,17 @@ describe('BaseAppService', () => {
 
       await expect(service.saveLibraryBooks([])).rejects.toThrow('disk full');
       expect(requestStoragePermission).not.toHaveBeenCalled();
+    });
+
+    test('rejects a failing immediate retry after permission is granted', async () => {
+      service.isAndroidApp = true;
+      vi.mocked(LibrarySvc.saveLibraryBooks)
+        .mockRejectedValueOnce(permError())
+        .mockRejectedValueOnce(new Error('disk full'));
+      vi.mocked(requestStoragePermission).mockResolvedValue(true);
+      await expect(service.saveLibraryBooks([])).rejects.toThrow('disk full');
+      expect(requestStoragePermission).toHaveBeenCalledTimes(1);
+      expect(LibrarySvc.saveLibraryBooks).toHaveBeenCalledTimes(2);
     });
 
     test('does not intercept on non-Android platforms', async () => {

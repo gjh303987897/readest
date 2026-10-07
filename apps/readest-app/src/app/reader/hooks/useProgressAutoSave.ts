@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useEnv } from '@/context/EnvContext';
 import { useBookDataStore, flushPendingLibrarySave } from '@/store/bookDataStore';
 import { useBookProgress } from '@/store/readerProgressStore';
@@ -7,71 +7,72 @@ import { debounce } from '@/utils/debounce';
 
 export const useProgressAutoSave = (bookKey: string) => {
   const { envConfig } = useEnv();
+  const environment = useRef(envConfig);
+  environment.current = envConfig;
   const getConfig = useBookDataStore((s) => s.getConfig);
   const saveConfig = useBookDataStore((s) => s.saveConfig);
-  // Reactive subscription so the effect below fires the debounced save
-  // whenever this book's progress changes. Reads from readerProgressStore.
   const progress = useBookProgress(bookKey);
 
-  // Tracks the location we last persisted (or, before the first save, the
-  // location loaded from disk at book open). We skip saveConfig when the
-  // in-memory location matches — saveConfig unconditionally bumps
-  // config.updatedAt, and a bump on the initial relocate makes the local
-  // record look newer than a fresher server-side push, so the next sync
-  // overwrites the server's progress with the stale local one (issue #4222).
-  const lastSavedLocationRef = useRef<string | null>(null);
-  const initializedRef = useRef(false);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const saveBookConfig = useCallback(
-    debounce(() => {
-      setTimeout(async () => {
-        const config = getConfig(bookKey);
-        if (!config) return;
-        const currentLocation = config.location ?? null;
-        if (!initializedRef.current) {
-          initializedRef.current = true;
-          lastSavedLocationRef.current = currentLocation;
-          return;
-        }
-        if (currentLocation === lastSavedLocationRef.current) return;
-        const settings = useSettingsStore.getState().settings;
-        await saveConfig(envConfig, bookKey, config, settings);
-        lastSavedLocationRef.current = currentLocation;
-      }, 500);
-    }, 1000),
-    [],
-  );
-
-  useEffect(() => {
-    // Snapshot the loaded-from-disk location before any progress events fire,
-    // so we don't treat the initial relocate as a user-driven change.
-    if (!initializedRef.current) {
+  const session = useMemo(() => {
+    let initialized = false;
+    let lastSavedLocation: string | null = null;
+    let scheduledLocation: string | null = null;
+    let pending = Promise.resolve();
+    const initialize = () => {
       const config = getConfig(bookKey);
-      if (config) {
-        initializedRef.current = true;
-        lastSavedLocationRef.current = config.location ?? null;
+      if (!initialized && config) {
+        initialized = true;
+        lastSavedLocation = scheduledLocation = config.location ?? null;
       }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookKey]);
-
-  useEffect(() => {
-    saveBookConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [progress, bookKey]);
-
-  // On unmount (book closed / navigated away), flush any pending throttled
-  // library.json write so the shelf reflects this session's last read
-  // position next time it loads. The per-book config.json is already on
-  // disk from the eager save in `saveConfig`, so this only catches the
-  // library-level rollup.
-  useEffect(() => {
-    return () => {
-      flushPendingLibrarySave().catch(() => {
-        // Best-effort on teardown — failures fall through to next launch's
-        // reconstruction from per-book config.json files.
-      });
     };
-  }, []);
+    const save = () => {
+      const config = getConfig(bookKey);
+      if (!config) return pending;
+      // The initial relocate must not bump updatedAt or overwrite newer
+      // remote progress. Snapshot the disk location before progress events.
+      if (!initialized) {
+        initialize();
+        return pending;
+      }
+      const location = config.location ?? null;
+      if (location === scheduledLocation) return pending;
+      scheduledLocation = location;
+      const snapshot = { ...config };
+      const currentEnvironment = environment.current;
+      const settings = useSettingsStore.getState().settings;
+      pending = pending
+        .then(async () => {
+          await saveConfig(currentEnvironment, bookKey, snapshot, settings);
+          lastSavedLocation = location;
+        })
+        .catch((error) => {
+          if (scheduledLocation === location) scheduledLocation = lastSavedLocation;
+          console.warn('Failed to save reading progress', error);
+        });
+      return pending;
+    };
+    const schedule = debounce(() => {
+      void save();
+    }, 1500);
+    return { initialize, save, schedule };
+  }, [bookKey, getConfig, saveConfig]);
+
+  useEffect(() => {
+    session.initialize();
+    return () => {
+      session.schedule.cancel();
+      // Capture the final config before reader teardown clears the store.
+      // Flush the shelf only after its per-book save has finished.
+      void session
+        .save()
+        .then(flushPendingLibrarySave)
+        .catch((error) => {
+          console.warn('Failed to flush reading progress', error);
+        });
+    };
+  }, [session]);
+
+  useEffect(() => {
+    session.schedule();
+  }, [progress, session]);
 };

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useEnv } from '@/context/EnvContext';
 import { useSyncContext } from '@/context/SyncContext';
@@ -86,6 +86,7 @@ export function useSync(bookKey?: string) {
   const [lastSyncedAtBooks, setLastSyncedAtBooks] = useState(0);
   const [lastSyncedAtConfigs, setLastSyncedAtConfigs] = useState(0);
   const [lastSyncedAtInited, setLastSyncedAtInited] = useState(false);
+  const initializedBookKey = useRef<string | undefined>(undefined);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<SyncResult>({
     books: null,
@@ -100,96 +101,105 @@ export function useSync(bookKey?: string) {
   }, [bookKey, setIsSyncing, syncing]);
 
   useEffect(() => {
-    if (!settings.version || lastSyncedAtInited) return;
+    if (!settings.version || (lastSyncedAtInited && initializedBookKey.current === bookKey)) return;
     if (bookKey && !config?.location) return;
 
     const booksAt = settings.lastSyncedAtBooks ?? 0;
     const configsAt = config?.lastSyncedAtConfig ?? settings.lastSyncedAtConfigs ?? 0;
     const now = Date.now();
+    initializedBookKey.current = bookKey;
     setLastSyncedAtBooks(now - booksAt > 3 * ONE_DAY_IN_MS ? 0 : booksAt - ONE_DAY_IN_MS);
     setLastSyncedAtConfigs(now - configsAt > 3 * ONE_DAY_IN_MS ? 0 : configsAt - ONE_DAY_IN_MS);
     setLastSyncedAtInited(true);
   }, [bookKey, config?.lastSyncedAtConfig, config?.location, lastSyncedAtInited, settings]);
 
-  const pullChanges = async (
-    type: 'books' | 'configs',
-    since: number,
-    setLastSyncedAt: React.Dispatch<React.SetStateAction<number>>,
-    setLaneSyncing: React.Dispatch<React.SetStateAction<boolean>>,
-    bookId?: string,
-    metaHash?: string,
-  ) => {
-    setLaneSyncing(true);
-    setSyncError(null);
+  const pullChanges = useCallback(
+    async (
+      type: 'books' | 'configs',
+      since: number,
+      setLastSyncedAt: React.Dispatch<React.SetStateAction<number>>,
+      setLaneSyncing: React.Dispatch<React.SetStateAction<boolean>>,
+      bookId?: string,
+      metaHash?: string,
+    ) => {
+      setLaneSyncing(true);
+      setSyncError(null);
 
-    try {
-      let records: BookDataRecord[] | null | undefined;
-      if (type === 'books' && !bookId && !metaHash) {
-        records = await pullBooksPaged(
-          async (cursor, limit) => {
-            const result = await syncClient.pullChanges(cursor, type, undefined, undefined, limit);
-            return result.books;
-          },
-          since,
-          (cursor) => {
-            setLastSyncedAt(cursor);
-            const latest = useSettingsStore.getState().settings;
-            latest.lastSyncedAtBooks = cursor;
-            setSettings(latest);
-          },
-        );
-      } else {
-        const result = await syncClient.pullChanges(since, type, bookId, metaHash);
-        records = result.configs;
+      try {
+        let records: BookDataRecord[] | null | undefined;
+        if (type === 'books' && !bookId && !metaHash) {
+          records = await pullBooksPaged(
+            async (cursor, limit) => {
+              const result = await syncClient.pullChanges(
+                cursor,
+                type,
+                undefined,
+                undefined,
+                limit,
+              );
+              return result.books;
+            },
+            since,
+            (cursor) => {
+              setLastSyncedAt(cursor);
+              const latest = useSettingsStore.getState().settings;
+              setSettings({ ...latest, lastSyncedAtBooks: cursor });
+            },
+          );
+        } else {
+          const result = await syncClient.pullChanges(since, type, bookId, metaHash);
+          records = result.configs;
+        }
+
+        setSyncResult((current) => ({ ...current, [type]: records }));
+        if (since > 1000 && !records?.length) return 0;
+
+        const maxTime = records?.length ? computeMaxTimestamp(records) : Date.now();
+        setLastSyncedAt(maxTime);
+        const latest = useSettingsStore.getState().settings;
+        if (type === 'books') {
+          setSettings({ ...latest, lastSyncedAtBooks: maxTime });
+        } else if (bookId && bookKey) {
+          setConfig(bookKey, { lastSyncedAtConfig: maxTime });
+        } else {
+          setSettings({ ...latest, lastSyncedAtConfigs: maxTime });
+        }
+        return countSyncedRecords(type, records);
+      } catch (error: unknown) {
+        console.error(error);
+        const message = error instanceof Error ? error.message : `Error pulling ${type}`;
+        const latest = useSettingsStore.getState().settings;
+        if (message.includes('Not authenticated') && latest.keepLogin) {
+          setSettings({ ...latest, keepLogin: false });
+          navigateToLogin(router);
+        }
+        setSyncError(message);
+        return 0;
+      } finally {
+        setLaneSyncing(false);
+        saveSettings(envConfig, useSettingsStore.getState().settings);
       }
+    },
+    [bookKey, envConfig, router, saveSettings, setConfig, setSettings, syncClient],
+  );
 
-      setSyncResult((current) => ({ ...current, [type]: records }));
-      if (since > 1000 && !records?.length) return 0;
-
-      const maxTime = records?.length ? computeMaxTimestamp(records) : Date.now();
-      setLastSyncedAt(maxTime);
-      const latest = useSettingsStore.getState().settings;
-      if (type === 'books') {
-        latest.lastSyncedAtBooks = maxTime;
-        setSettings(latest);
-      } else if (bookId && bookKey) {
-        setConfig(bookKey, { lastSyncedAtConfig: maxTime });
-      } else {
-        latest.lastSyncedAtConfigs = maxTime;
-        setSettings(latest);
+  const pushChanges = useCallback(
+    async (payload: SyncData): Promise<boolean> => {
+      setSyncing(true);
+      setSyncError(null);
+      try {
+        setSyncResult(await syncClient.pushChanges(payload));
+        return true;
+      } catch (error: unknown) {
+        console.error(error);
+        setSyncError(error instanceof Error ? error.message : 'Error pushing changes');
+        return false;
+      } finally {
+        setSyncing(false);
       }
-      return countSyncedRecords(type, records);
-    } catch (error: unknown) {
-      console.error(error);
-      const message = error instanceof Error ? error.message : `Error pulling ${type}`;
-      const latest = useSettingsStore.getState().settings;
-      if (message.includes('Not authenticated') && latest.keepLogin) {
-        latest.keepLogin = false;
-        setSettings(latest);
-        navigateToLogin(router);
-      }
-      setSyncError(message);
-      return 0;
-    } finally {
-      setLaneSyncing(false);
-      saveSettings(envConfig, useSettingsStore.getState().settings);
-    }
-  };
-
-  const pushChanges = async (payload: SyncData): Promise<boolean> => {
-    setSyncing(true);
-    setSyncError(null);
-    try {
-      setSyncResult(await syncClient.pushChanges(payload));
-      return true;
-    } catch (error: unknown) {
-      console.error(error);
-      setSyncError(error instanceof Error ? error.message : 'Error pushing changes');
-      return false;
-    } finally {
-      setSyncing(false);
-    }
-  };
+    },
+    [syncClient],
+  );
 
   const syncBooks = useCallback(
     async (books?: Book[], op: SyncOp = 'both', since?: number) => {
@@ -205,8 +215,7 @@ export function useSync(bookKey?: string) {
       }
       return undefined;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lastSyncedAtBooks, lastSyncedAtInited],
+    [lastSyncedAtBooks, lastSyncedAtInited, pullChanges, pushChanges],
   );
 
   const syncConfigs = useCallback(
@@ -227,8 +236,7 @@ export function useSync(bookKey?: string) {
         );
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lastSyncedAtConfigs, lastSyncedAtInited],
+    [bookKey, lastSyncedAtConfigs, lastSyncedAtInited, pullChanges, pushChanges, setConfig],
   );
 
   useEffect(() => {

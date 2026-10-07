@@ -130,15 +130,16 @@ export interface AppService {
   loadSettings(): Promise<SystemSettings>;
   saveSettings(settings: SystemSettings): Promise<void>;
   importBook(file: string | File, books: Book[], options?: ImportBookOptions): Promise<Book | null>;
-  deleteBook(book: Book, deleteAction: DeleteAction): Promise<void>;
-  uploadBook(book: Book, onProgress?: ProgressHandler): Promise<void>;
+  deleteBook(book: Book, deleteAction: DeleteAction, signal?: AbortSignal): Promise<void>;
+  uploadBook(book: Book, onProgress?: ProgressHandler, signal?: AbortSignal): Promise<void>;
   downloadBook(
     book: Book,
     onlyCover?: boolean,
     redownload?: boolean,
     onProgress?: ProgressHandler,
+    signal?: AbortSignal,
   ): Promise<void>;
-  downloadBookCovers(books: Book[], redownload?: boolean): Promise<void>;
+  downloadBookCovers(books: Book[], redownload?: boolean, signal?: AbortSignal): Promise<void>;
   isBookAvailable(book: Book): Promise<boolean>;
   getBookFileSize(book: Book): Promise<number | null>;
   loadBookConfig(book: Book, settings: SystemSettings): Promise<BookConfig>;

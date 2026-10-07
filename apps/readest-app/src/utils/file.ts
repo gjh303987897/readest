@@ -348,7 +348,7 @@ export class RemoteFile extends File implements ClosableFile {
     if (!response.ok) {
       throw new Error(`Failed to fetch file size: ${response.status}`);
     }
-    this.#size = Number(response.headers.get('content-length'));
+    this.#size = this.parseSize(response.headers.get('content-length'));
     this.#type = response.headers.get('content-type') || '';
     return this;
   }
@@ -358,7 +358,15 @@ export class RemoteFile extends File implements ClosableFile {
     if (!response.ok) {
       throw new Error(`Failed to fetch file size: ${response.status}`);
     }
-    this.#size = Number(response.headers.get('content-range')?.split('/')[1]);
+    const range = response.headers.get('content-range')?.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
+    if (response.status !== 206 || !range) {
+      throw new Error('Invalid or missing Content-Range for remote file');
+    }
+    const size = this.parseSize(range[3]!);
+    if (Number(range[1]) !== 0 || Number(range[2]) !== Math.min(1023, size - 1)) {
+      throw new Error('Invalid Content-Range for remote file');
+    }
+    this.#size = size;
     this.#type = response.headers.get('content-type') || '';
     return this;
   }
@@ -370,7 +378,7 @@ export class RemoteFile extends File implements ClosableFile {
     if (!response.ok) {
       throw new Error(`Failed to fetch file size: ${response.status}`);
     }
-    this.#size = Number(response.headers.get('x-total-size'));
+    this.#size = this.parseSize(response.headers.get('x-total-size'));
     this.#type = response.headers.get('content-type') || '';
     return this;
   }
@@ -385,6 +393,15 @@ export class RemoteFile extends File implements ClosableFile {
     } else {
       return this._open_with_head();
     }
+  }
+
+  private parseSize(value: string | null): number {
+    if (value === null || !/^\d+$/.test(value)) {
+      throw new Error('Invalid or missing remote file size');
+    }
+    const size = Number(value);
+    if (!Number.isSafeInteger(size)) throw new Error('Invalid remote file size');
+    return size;
   }
 
   async close(): Promise<void> {

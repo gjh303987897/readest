@@ -47,6 +47,12 @@ type TableName = keyof typeof transformsToDB;
 
 type DBError = { table: TableName; error: PostgrestError };
 
+// PostgREST's logic grammar requires quoting values containing delimiters,
+// and escaping quotes/backslashes inside those literals. URL encoding alone
+// does not protect an .or() expression after the server decodes it.
+export const quoteFilterValue = (value: string | number): string =>
+  `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+
 export async function GET(req: NextRequest) {
   const { user, token } = await validateUserAndToken(req.headers.get('authorization'));
   if (!user || !token) {
@@ -107,7 +113,9 @@ export async function GET(req: NextRequest) {
           .range(offset, offset + PAGE_SIZE - 1);
 
         if (bookParam && metaHashParam) {
-          query = query.or(`book_hash.eq.${bookParam},meta_hash.eq.${metaHashParam}`);
+          query = query.or(
+            `book_hash.eq.${quoteFilterValue(bookParam)},meta_hash.eq.${quoteFilterValue(metaHashParam)}`,
+          );
         } else if (bookParam) {
           query = query.eq('book_hash', bookParam);
         } else if (metaHashParam) {
@@ -167,7 +175,9 @@ export async function GET(req: NextRequest) {
         q: T,
       ): T => {
         if (bookParam && metaHashParam) {
-          return q.or(`book_hash.eq.${bookParam},meta_hash.eq.${metaHashParam}`);
+          return q.or(
+            `book_hash.eq.${quoteFilterValue(bookParam)},meta_hash.eq.${quoteFilterValue(metaHashParam)}`,
+          );
         } else if (bookParam) {
           return q.eq('book_hash', bookParam);
         } else if (metaHashParam) {
@@ -305,7 +315,9 @@ export async function POST(req: NextRequest) {
       // Fetch existing records for this batch
       const orConditions = matchConditions
         .map((cond) => {
-          const parts = Object.entries(cond).map(([key, val]) => `${key}.eq.${val}`);
+          const parts = Object.entries(cond).map(
+            ([key, val]) => `${key}.eq.${quoteFilterValue(val)}`,
+          );
           return `and(${parts.join(',')})`;
         })
         .join(',');

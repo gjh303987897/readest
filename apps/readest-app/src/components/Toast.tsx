@@ -14,7 +14,10 @@ export const Toast = () => {
   const [toastTimeout, setToastTimeout] = useState(5000);
   const [messageClass, setMessageClass] = useState('');
   const [isVisible, setIsVisible] = useState(false);
+  const [toastRevision, setToastRevision] = useState(0);
   const toastDismissTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messageClearTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const callbackTimeouts = useRef(new Set<ReturnType<typeof setTimeout>>());
 
   const toastClassMap = {
     info: 'toast-info toast-center toast-middle',
@@ -71,34 +74,45 @@ export const Toast = () => {
 
   useEffect(() => {
     if (toastMessage) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         setIsVisible(true);
       }, 0);
+      return () => clearTimeout(timer);
     }
-  }, [toastMessage]);
+    return;
+  }, [toastMessage, toastRevision]);
 
   useEffect(() => {
     if (toastDismissTimeout.current) clearTimeout(toastDismissTimeout.current);
     if (toastMessage) {
       const timeout = setTimeout(() => {
         setIsVisible(false);
-        setTimeout(() => setToastMessage(''), 300);
+        messageClearTimeout.current = setTimeout(() => setToastMessage(''), 300);
       }, toastTimeout);
       toastDismissTimeout.current = timeout;
       return () => {
-        if (timeout) clearTimeout(timeout);
+        clearTimeout(timeout);
+        if (messageClearTimeout.current) clearTimeout(messageClearTimeout.current);
       };
     }
     return;
-  }, [toastMessage, toastTimeout]);
+  }, [toastMessage, toastTimeout, toastRevision]);
 
   const handleShowToast = async (event: CustomEvent) => {
     const { message, type = 'info', timeout, className = '', callback = null } = event.detail;
+    if (messageClearTimeout.current) clearTimeout(messageClearTimeout.current);
     setToastMessage(message);
+    setToastRevision((revision) => revision + 1);
     setToastType(type);
-    if (timeout) setToastTimeout(timeout);
+    const duration =
+      typeof timeout === 'number' && timeout > 0 && Number.isFinite(timeout) ? timeout : 5000;
+    setToastTimeout(duration);
     if (callback && typeof callback === 'function') {
-      setTimeout(() => callback(), timeout || 5000);
+      const timer = setTimeout(() => {
+        callbackTimeouts.current.delete(timer);
+        callback();
+      }, duration);
+      callbackTimeouts.current.add(timer);
     }
     setMessageClass(className);
   };
@@ -107,12 +121,17 @@ export const Toast = () => {
     eventDispatcher.on('toast', handleShowToast);
     return () => {
       eventDispatcher.off('toast', handleShowToast);
+      if (toastDismissTimeout.current) clearTimeout(toastDismissTimeout.current);
+      if (messageClearTimeout.current) clearTimeout(messageClearTimeout.current);
+      callbackTimeouts.current.forEach(clearTimeout);
+      callbackTimeouts.current.clear();
     };
   }, []);
 
   const handleDismiss = () => {
     setIsVisible(false);
-    setTimeout(() => setToastMessage(''), 300);
+    if (messageClearTimeout.current) clearTimeout(messageClearTimeout.current);
+    messageClearTimeout.current = setTimeout(() => setToastMessage(''), 300);
     if (toastDismissTimeout.current) clearTimeout(toastDismissTimeout.current);
   };
 

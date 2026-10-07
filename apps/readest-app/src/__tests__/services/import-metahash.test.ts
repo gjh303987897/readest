@@ -98,6 +98,25 @@ function makeBook(overrides: Partial<Book> = {}): Book {
   };
 }
 
+it.each([
+  undefined,
+  'blob:old',
+])('refreshes the returned existing cover URL %s on reimport', async (oldUrl) => {
+  const svc = new TestAppService();
+  const fs = svc.getFs();
+  fs.exists.mockResolvedValue(false);
+  fs.readFile.mockResolvedValue('{}');
+  const existing = makeBook({ hash: 'same-hash', coverImageUrl: oldUrl });
+  mockPartialMD5.mockResolvedValue('same-hash');
+  setupMockBookDoc();
+  const generate = vi.spyOn(svc, 'generateCoverImageUrl').mockResolvedValue('blob:fresh');
+  const result = await svc.importBook(new File(['content'], 'test.epub'), [existing]);
+  expect(generate).toHaveBeenCalledWith(existing);
+  expect(result).toBe(existing);
+  expect(result?.coverImageUrl).toBe('blob:fresh');
+  generate.mockRestore();
+});
+
 const TEST_METADATA = {
   title: 'Test Book',
   author: 'Test Author',

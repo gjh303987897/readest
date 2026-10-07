@@ -78,11 +78,20 @@ export const createProgressThrottle = (
   };
 };
 
-export const webUpload = (file: File, uploadUrl: string, onProgress?: ProgressHandler) => {
+export const webUpload = (
+  file: File,
+  uploadUrl: string,
+  onProgress?: ProgressHandler,
+  signal?: AbortSignal,
+) => {
   return new Promise<void>((resolve, reject) => {
+    signal?.throwIfAborted();
     const startTime = Date.now();
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', uploadUrl, true);
+    const abort = () => xhr.abort();
+    const cleanup = () => signal?.removeEventListener('abort', abort);
+    signal?.addEventListener('abort', abort, { once: true });
 
     xhr.upload.onprogress = (event) => {
       if (onProgress && event.lengthComputable) {
@@ -95,6 +104,7 @@ export const webUpload = (file: File, uploadUrl: string, onProgress?: ProgressHa
     };
 
     xhr.onload = () => {
+      cleanup();
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
       } else {
@@ -102,7 +112,14 @@ export const webUpload = (file: File, uploadUrl: string, onProgress?: ProgressHa
       }
     };
 
-    xhr.onerror = () => reject(new Error('Upload failed'));
+    xhr.onerror = () => {
+      cleanup();
+      reject(new Error('Upload failed'));
+    };
+    xhr.onabort = () => {
+      cleanup();
+      reject(signal?.reason ?? new DOMException('Upload cancelled', 'AbortError'));
+    };
 
     xhr.send(file);
   });
@@ -112,10 +129,13 @@ export const webDownload = async (
   downloadUrl: string,
   onProgress?: ProgressHandler,
   headers?: Record<string, string>,
+  signal?: AbortSignal,
 ) => {
+  signal?.throwIfAborted();
   const response = await fetch(downloadUrl, {
     method: 'GET',
     headers: headers ? headers : undefined,
+    signal,
   });
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
@@ -131,13 +151,15 @@ export const webDownload = async (
   // missing length is common in the wild. Fall back to indeterminate
   // progress (total=0) instead of failing the download. UI callers already
   // guard `total === 0` to skip percentage updates.
-  const totalSize = parseInt(contentLength || '0', 10);
+  const length = Number(contentLength);
+  const totalSize = Number.isSafeInteger(length) && length > 0 ? length : 0;
   let receivedSize = 0;
   const reader = response.body!.getReader();
   const chunks: Uint8Array[] = [];
 
   const startTime = Date.now();
   while (true) {
+    signal?.throwIfAborted();
     const { done, value } = await reader.read();
     if (done) break;
 
@@ -148,7 +170,7 @@ export const webDownload = async (
       onProgress({
         progress: receivedSize,
         total: totalSize,
-        transferSpeed: receivedSize / ((Date.now() - startTime) / 1000),
+        transferSpeed: receivedSize / Math.max(0.001, (Date.now() - startTime) / 1000),
       });
     }
   }

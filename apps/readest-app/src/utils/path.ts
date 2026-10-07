@@ -3,7 +3,11 @@ import { isContentURI, isFileURI, isValidURL } from './misc';
 
 export const getFilename = (fileOrUri: string) => {
   if (isValidURL(fileOrUri) || isContentURI(fileOrUri) || isFileURI(fileOrUri)) {
-    fileOrUri = decodeURI(fileOrUri);
+    try {
+      fileOrUri = decodeURI(fileOrUri);
+    } catch {
+      // Preserve filenames containing literal or malformed percent escapes.
+    }
   }
   const normalizedPath = fileOrUri.replace(/\\/g, '/');
   const parts = normalizedPath.split('/');
