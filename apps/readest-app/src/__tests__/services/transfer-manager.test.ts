@@ -63,6 +63,7 @@ const resetTransferManager = () => {
   mgr['updateBook'] = null;
   mgr['_'] = null;
   (mgr['abortControllers'] as Map<string, AbortController>).clear();
+  (mgr['retryAfter'] as Map<string, number>).clear();
 };
 
 const resetTransferStore = () => {
@@ -165,9 +166,11 @@ describe('TransferManager', () => {
 
   // ── queueUpload ──────────────────────────────────────────────────
   describe('queueUpload', () => {
-    test('returns null when not initialized', () => {
+    test('keeps early uploads pending until initialization', () => {
       const result = transferManager.queueUpload(makeBook());
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(useTransferStore.getState().getPendingTransfers()).toHaveLength(1);
+      expect(useTransferStore.getState().getActiveTransfers()).toHaveLength(0);
     });
 
     test('queues an upload and returns a transfer id', async () => {
@@ -294,9 +297,9 @@ describe('TransferManager', () => {
 
   // ── queueBatchUploads ────────────────────────────────────────────
   describe('queueBatchUploads', () => {
-    test('returns empty array when not initialized', () => {
+    test('queues batch uploads before initialization', () => {
       const result = transferManager.queueBatchUploads([makeBook()]);
-      expect(result).toEqual([]);
+      expect(result).toHaveLength(1);
     });
 
     test('queues multiple uploads', async () => {
@@ -732,7 +735,7 @@ describe('TransferManager', () => {
       );
 
       transferManager.queueUpload(book);
-      await vi.advanceTimersByTimeAsync(10000);
+      await vi.advanceTimersByTimeAsync(15000);
 
       // After all retries exhausted, error toast should be dispatched
       expect(eventDispatcher.dispatch).toHaveBeenCalledWith(
@@ -785,4 +788,57 @@ describe('TransferManager', () => {
       ).resolves.not.toThrow();
     });
   });
+});
+
+test('backoff is respected while other queue work completes', async () => {
+  const books = [makeBook({ hash: 'retry' }), makeBook({ hash: 'success' })];
+  const app = makeAppService();
+  const attempts: number[] = [];
+  (app['uploadBook'] as Mock).mockImplementation(async (book: Book) => {
+    if (book.hash === 'retry') {
+      attempts.push(Date.now());
+      throw new Error('offline');
+    }
+  });
+  await transferManager.initialize(app as never, () => books, vi.fn(), translationFn);
+  transferManager.queueUpload(books[0]!);
+  await vi.advanceTimersByTimeAsync(0);
+  transferManager.queueUpload(books[1]!);
+  await vi.advanceTimersByTimeAsync(1999);
+  expect(attempts).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(attempts).toHaveLength(2);
+  expect(attempts[1]! - attempts[0]!).toBeGreaterThanOrEqual(2000);
+});
+
+test('counts one running transfer once', async () => {
+  let finish!: () => void;
+  const app = makeAppService();
+  (app['uploadBook'] as Mock).mockImplementation(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await transferManager.initialize(app as never, () => [makeBook()], vi.fn(), translationFn);
+  transferManager.queueUpload(makeBook());
+  expect(useTransferStore.getState().activeCount).toBe(1);
+  finish();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(useTransferStore.getState().activeCount).toBe(0);
+});
+
+test('early uploads preserve a previously persisted queue', async () => {
+  const previous = makeTransferItem({ id: 'persisted', bookHash: 'previous' });
+  localStorage.setItem(
+    'readest_transfer_queue',
+    JSON.stringify({ transfers: { persisted: previous }, isQueuePaused: true }),
+  );
+  const id = transferManager.queueUpload(makeBook({ hash: 'early' }));
+  expect(id).not.toBeNull();
+  expect(useTransferStore.getState().transfers['persisted']).toBeDefined();
+  const app = makeAppService();
+  await transferManager.initialize(app as never, () => [], vi.fn(), translationFn);
+  expect(useTransferStore.getState().getPendingTransfers()).toHaveLength(2);
+  expect(useTransferStore.getState().transfers[id!]).toBeDefined();
 });

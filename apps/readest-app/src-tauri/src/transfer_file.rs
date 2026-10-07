@@ -6,10 +6,10 @@
 //!
 //! Download files from a remote HTTP server to disk.
 
+use crate::filesystem_scope::{is_path_allowed, resolved_path};
 use futures_util::TryStreamExt;
 use serde::{ser::Serializer, Serialize};
 use tauri::{command, ipc::Channel, AppHandle};
-use tauri_plugin_fs::FsExt;
 use tokio::{
     fs::File,
     io::{AsyncWriteExt, BufWriter},
@@ -87,45 +87,12 @@ pub enum Error {
     Forbidden(String),
 }
 
-/// Reject paths the webview must not be allowed to target: relative paths and
-/// any `..` parent-directory traversal. `fs_scope().is_allowed` is a glob match,
-/// so a `..` segment could otherwise escape an allowed prefix.
-fn has_disallowed_components(file_path: &str) -> bool {
-    let path = std::path::Path::new(file_path);
-    !path.is_absolute()
-        || path
-            .components()
-            .any(|c| matches!(c, std::path::Component::ParentDir))
-}
-
-/// The app's own storage always carries either the `Readest` data folder or the
-/// app's bundle identifier in its path — the Android sandbox
-/// (`/data/user/0/<identifier>/…`, including the cache dir) and the desktop
-/// identifier dirs (`…/<identifier>/…`). Those paths aren't in the global
-/// `fs_scope()` (their capability patterns are command-scoped), so `is_allowed`
-/// returns false for the app's own files. Accept these segments as a fallback,
-/// the way `dir_scanner::read_dir` does. `..` is already rejected, so foreign
-/// targets (e.g. `~/.ssh/id_rsa`) stay blocked.
-fn is_within_app_storage(file_path: &str, app_identifier: &str) -> bool {
-    file_path.contains("Readest") || file_path.contains(app_identifier)
-}
-
-/// Validate a webview-supplied `file_path` before any `File::create`/`File::open`.
-/// Without this, `download_file`/`upload_file` would write/read arbitrary local
-/// paths (e.g. `~/.ssh/id_rsa`, autostart entries) from any JS running in the
-/// privileged Tauri origin — see GHSA-55vr-pvq5-6fmg. We require an absolute,
-/// traversal-free path that is either granted by the fs scope (persisted dialog
-/// grants for custom/external roots) or lives inside the app's own storage.
 fn ensure_path_allowed(app: &AppHandle, file_path: &str) -> Result<()> {
-    if has_disallowed_components(file_path) {
-        return Err(Error::Forbidden(file_path.to_string()));
+    if is_path_allowed(app, std::path::Path::new(file_path)) {
+        Ok(())
+    } else {
+        Err(Error::Forbidden(file_path.to_string()))
     }
-    if app.fs_scope().is_allowed(std::path::Path::new(file_path))
-        || is_within_app_storage(file_path, &app.config().identifier)
-    {
-        return Ok(());
-    }
-    Err(Error::Forbidden(file_path.to_string()))
 }
 
 impl Serialize for Error {
@@ -157,11 +124,60 @@ pub async fn download_file(
     skip_ssl_verification: Option<bool>,
     on_progress: Channel<ProgressPayload>,
 ) -> Result<HashMap<String, String>> {
+    ensure_path_allowed(&app, file_path)?;
+    let target = resolved_path(std::path::Path::new(file_path))?;
+    let name = target
+        .file_name()
+        .ok_or_else(|| Error::Forbidden(file_path.into()))?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| Error::ContentLength(e.to_string()))?
+        .as_nanos();
+    let temporary = target.with_file_name(format!(".{}.{nonce}.part", name.to_string_lossy()));
+    // Reserve a fresh sibling. Never truncate an existing file before validation completes.
+    let reserved = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .await?;
+    drop(reserved);
+    let result = download_to_file(
+        url,
+        &temporary,
+        headers,
+        body,
+        single_threaded,
+        skip_ssl_verification,
+        on_progress,
+    )
+    .await;
+    match result {
+        Ok(headers) => {
+            if let Err(error) = tokio::fs::rename(&temporary, &target).await {
+                let _ = tokio::fs::remove_file(&temporary).await;
+                return Err(error.into());
+            }
+            Ok(headers)
+        }
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&temporary).await;
+            Err(error)
+        }
+    }
+}
+
+async fn download_to_file(
+    url: &str,
+    file_path: &std::path::Path,
+    headers: HashMap<String, String>,
+    body: Option<String>,
+    single_threaded: Option<bool>,
+    skip_ssl_verification: Option<bool>,
+    on_progress: Channel<ProgressPayload>,
+) -> Result<HashMap<String, String>> {
     use futures::stream::{self, StreamExt};
     use std::cmp::min;
     use tokio::io::AsyncSeekExt;
-
-    ensure_path_allowed(&app, file_path)?;
 
     const PART_SIZE: u64 = 1024 * 1024;
 
@@ -169,12 +185,12 @@ pub async fn download_file(
         .danger_accept_invalid_certs(skip_ssl_verification.unwrap_or(false))
         .danger_accept_invalid_hostnames(skip_ssl_verification.unwrap_or(false))
         .build()?;
-    let force_single = single_threaded.unwrap_or(false);
+    let force_single = single_threaded.unwrap_or(false) || body.is_some();
 
     async fn single_threaded_download(
         client: &reqwest::Client,
         url: &str,
-        file_path: &str,
+        file_path: &std::path::Path,
         headers: &HashMap<String, String>,
         body: &Option<String>,
         on_progress: Channel<ProgressPayload>,
@@ -255,7 +271,15 @@ pub async fn download_file(
         }
     }
 
-    if !accept_ranges || total == 0 {
+    if range_resp.status() != reqwest::StatusCode::PARTIAL_CONTENT
+        || !accept_ranges
+        || total == 0
+        || range_resp
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok())
+            != Some(format!("bytes 0-0/{total}").as_str())
+    {
         return single_threaded_download(&client, url, file_path, &headers, &body, on_progress)
             .await;
     }
@@ -269,58 +293,69 @@ pub async fn download_file(
     let progress = Arc::new(tokio::sync::Mutex::new(TransferStats::default()));
 
     stream::iter(0..part_count)
-        .for_each_concurrent(8, |i| {
+        .map(|i| {
             let client = client.clone();
             let file = Arc::clone(&file);
             let progress = Arc::clone(&progress);
             let headers = headers.clone();
-            let url = url.to_string();
             let on_progress = on_progress.clone();
-
             async move {
                 let start = i * PART_SIZE;
                 let end = min(start + PART_SIZE - 1, total - 1);
-                let range_header = format!("bytes={start}-{end}");
-
-                let mut req = client.get(&url).header("Range", range_header);
+                let mut req = client.get(url);
                 for (key, value) in headers {
                     req = req.header(key, value);
                 }
-
-                let resp = match req.send().await {
-                    Ok(r) => r,
-                    Err(_) => return,
-                };
-
-                if !resp.status().is_success()
-                    && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT
-                {
-                    return;
+                let resp = req
+                    .header("Range", format!("bytes={start}-{end}"))
+                    .send()
+                    .await?;
+                if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+                    return Err(Error::HttpErrorCode(
+                        resp.status().as_u16(),
+                        "expected a partial response".into(),
+                    ));
                 }
-
-                let bytes = match resp.bytes().await {
-                    Ok(b) => b,
-                    Err(_) => return,
-                };
-
+                let expected_range = format!("bytes {start}-{end}/{total}");
+                if resp
+                    .headers()
+                    .get("content-range")
+                    .and_then(|v| v.to_str().ok())
+                    != Some(expected_range.as_str())
+                {
+                    return Err(Error::ContentLength("invalid Content-Range".into()));
+                }
+                let expected_length = (end - start + 1) as usize;
+                let mut bytes = Vec::with_capacity(expected_length);
+                let mut chunks = resp.bytes_stream();
+                while let Some(chunk) = chunks.try_next().await? {
+                    if chunk.len() > expected_length - bytes.len() {
+                        return Err(Error::ContentLength("range response is too long".into()));
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
+                if bytes.len() != expected_length {
+                    return Err(Error::ContentLength("incomplete range response".into()));
+                }
                 {
                     let mut f = file.lock().await;
-                    f.seek(std::io::SeekFrom::Start(start)).await.unwrap();
-                    f.write_all(&bytes).await.unwrap();
+                    f.seek(std::io::SeekFrom::Start(start)).await?;
+                    f.write_all(&bytes).await?;
                 }
-
-                {
-                    let mut stat = progress.lock().await;
-                    stat.record_chunk_transfer(bytes.len());
-                    let _ = on_progress.send(ProgressPayload {
-                        progress: stat.total_transferred,
-                        total,
-                        transfer_speed: stat.transfer_speed,
-                    });
-                }
+                let mut stat = progress.lock().await;
+                stat.record_chunk_transfer(bytes.len());
+                let _ = on_progress.send(ProgressPayload {
+                    progress: stat.total_transferred,
+                    total,
+                    transfer_speed: stat.transfer_speed,
+                });
+                Ok::<(), Error>(())
             }
         })
-        .await;
+        .buffer_unordered(8)
+        .try_collect::<Vec<_>>()
+        .await?;
+    file.lock().await.sync_all().await?;
 
     Ok(resp_headers)
 }
@@ -337,7 +372,7 @@ pub async fn upload_file(
     ensure_path_allowed(&app, file_path)?;
 
     let file = File::open(file_path).await?;
-    let file_len = file.metadata().await.unwrap().len();
+    let file_len = file.metadata().await?.len();
 
     let client = reqwest::Client::new();
     let mut request = match method.to_uppercase().as_str() {
@@ -380,57 +415,4 @@ fn file_to_body(channel: Channel<ProgressPayload>, file: File, file_len: u64) ->
             });
         }),
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{has_disallowed_components, is_within_app_storage};
-
-    #[test]
-    fn app_storage_fallback_accepts_app_paths() {
-        let id = "com.bilingify.readest";
-        // Managed books and covers live under the `Readest` data directory.
-        assert!(is_within_app_storage(
-            "/data/user/0/com.bilingify.readest/Readest/Books/abc/cover.png",
-            id
-        ));
-        // Cache downloads carry no `Readest` segment but are still inside the
-        // app sandbox, matched via the bundle identifier.
-        assert!(is_within_app_storage(
-            "/data/user/0/com.bilingify.readest/cache/imported-book.epub",
-            id
-        ));
-        // Foreign targets carry neither segment and stay blocked.
-        assert!(!is_within_app_storage("/home/user/.ssh/id_rsa", id));
-        assert!(!is_within_app_storage("/etc/passwd", id));
-    }
-
-    #[test]
-    fn rejects_relative_and_traversal_paths() {
-        // Relative paths can't be reasoned about against an absolute scope.
-        assert!(has_disallowed_components("relative/file.epub"));
-        assert!(has_disallowed_components("file.epub"));
-        // `..` traversal, whether the path is relative or absolute.
-        assert!(has_disallowed_components("foo/../bar"));
-        assert!(has_disallowed_components(
-            "/home/user/Readest/../../.ssh/id_rsa"
-        ));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn accepts_plain_absolute_paths() {
-        assert!(!has_disallowed_components(
-            "/Users/x/Library/Caches/app/book.epub"
-        ));
-        assert!(!has_disallowed_components("/Users/x/Readest/Books/h.epub"));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn accepts_plain_absolute_paths_windows() {
-        assert!(!has_disallowed_components(
-            "C:\\Users\\x\\AppData\\Roaming\\Readest\\Books\\h.epub"
-        ));
-    }
 }

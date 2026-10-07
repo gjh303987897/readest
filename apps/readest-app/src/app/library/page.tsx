@@ -69,7 +69,7 @@ const LibraryPage = () => {
   const { user, logout } = useAuth();
   const { settings, isSettingsDialogOpen, setSettingsDialogBookKey, setSettingsDialogOpen } =
     useSettingsStore();
-  const { libraryLoaded } = useLibrary();
+  const { libraryLoaded, libraryError, retryLibrary } = useLibrary();
   const library = useLibraryStore((state) => state.visibleLibrary);
   const updateBook = useLibraryStore((state) => state.updateBook);
   const updateBooks = useLibraryStore((state) => state.updateBooks);
@@ -519,8 +519,18 @@ const LibraryPage = () => {
       </header>
 
       {!libraryLoaded ? (
-        <div className='flex min-h-0 flex-1 items-center justify-center'>
-          <Spinner loading />
+        <div className='flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center'>
+          {libraryError ? (
+            <>
+              <p role='alert'>{_('Failed to load library')}</p>
+              <p className='text-base-content/60 text-sm'>{libraryError}</p>
+              <button className='btn btn-contrast' onClick={retryLibrary}>
+                {_('Retry')}
+              </button>
+            </>
+          ) : (
+            <Spinner loading />
+          )}
         </div>
       ) : visibleBooks.length === 0 ? (
         <div className='flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center'>
@@ -698,6 +708,7 @@ const LibraryPage = () => {
       />
       <PrivacyUnlockDialog
         isOpen={isUnlockDialogOpen}
+        requirePin={!!pendingPrivacyBook}
         onClose={() => {
           setUnlockDialogOpen(false);
           setPendingPrivacyBook(null);

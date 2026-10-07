@@ -4,6 +4,7 @@ import { getLibraryFilename } from '@/utils/book';
 import { safeLoadJSON, safeSaveJSON } from './persistence';
 
 const COVER_CONCURRENCY = 20;
+const pendingLibrarySaves = new WeakMap<FileSystem, Promise<void>>();
 
 async function processInBatches<T>(
   items: T[],
@@ -42,21 +43,40 @@ export async function saveLibraryBooks(
 ): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const incoming = books.map(({ coverImageUrl, ...rest }) => rest);
+  const previous = pendingLibrarySaves.get(fs) ?? Promise.resolve();
+  const saving = previous
+    .catch(() => {})
+    .then(async () => {
+      if (options?.replace) {
+        await safeSaveJSON(fs, getLibraryFilename(), 'Books', incoming);
+        return;
+      }
 
-  if (options?.replace) {
-    await safeSaveJSON(fs, getLibraryFilename(), 'Books', incoming);
-    return;
+      // Merge-floor: treat the on-disk library as a floor. A routine save may add
+      // new books or modify existing rows (including setting `deletedAt`
+      // tombstones), but it must never silently drop a book that exists on disk.
+      // This stops a stale or partially-loaded in-memory library (e.g. the
+      // cold-start "Open with" race) from wiping library.json. Deliberate removals
+      // must go through `{ replace: true }`.
+      const existing = await safeLoadJSON<Book[]>(fs, getLibraryFilename(), 'Books', []);
+      const merged = new Map<string, Book>();
+      for (const book of existing) merged.set(book.hash, book);
+      for (const book of incoming) {
+        const current = merged.get(book.hash);
+        if (
+          !current ||
+          Math.max(current.updatedAt ?? current.lastUpdated ?? 0, current.deletedAt ?? 0) <=
+            Math.max(book.updatedAt ?? 0, book.deletedAt ?? 0)
+        ) {
+          merged.set(book.hash, book);
+        }
+      }
+      await safeSaveJSON(fs, getLibraryFilename(), 'Books', Array.from(merged.values()));
+    });
+  pendingLibrarySaves.set(fs, saving);
+  try {
+    await saving;
+  } finally {
+    if (pendingLibrarySaves.get(fs) === saving) pendingLibrarySaves.delete(fs);
   }
-
-  // Merge-floor: treat the on-disk library as a floor. A routine save may add
-  // new books or modify existing rows (including setting `deletedAt`
-  // tombstones), but it must never silently drop a book that exists on disk.
-  // This stops a stale or partially-loaded in-memory library (e.g. the
-  // cold-start "Open with" race) from wiping library.json. Deliberate removals
-  // must go through `{ replace: true }`.
-  const existing = await safeLoadJSON<Book[]>(fs, getLibraryFilename(), 'Books', []);
-  const merged = new Map<string, Book>();
-  for (const book of existing) merged.set(book.hash, book);
-  for (const book of incoming) merged.set(book.hash, book); // incoming wins per hash
-  await safeSaveJSON(fs, getLibraryFilename(), 'Books', Array.from(merged.values()));
 }

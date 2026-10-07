@@ -2077,5 +2077,13 @@
   "Invalid server endpoint URL": "服务器地址无效",
   "Endpoint must use HTTP or HTTPS": "服务器地址必须使用 HTTP 或 HTTPS",
   "Endpoint returned invalid runtime configuration": "服务器返回的运行配置无效",
-  "Failed to load OPDS catalog": "加载 OPDS 目录失败"
+  "Failed to load OPDS catalog": "加载 OPDS 目录失败",
+  "Failed to load library": "书库加载失败",
+  "Failed to sync books": "书籍同步失败",
+  "Failed to save privacy PIN": "隐私 PIN 保存失败，请重试",
+  "Failed to disable Privacy Mode": "关闭隐私模式失败，请重试",
+  "Catalog limit reached. Only part of the catalog is shown.": "目录达到加载上限，当前仅显示部分书籍。",
+  "Failed to import books": "书籍导入失败",
+  "{{count}} book(s) could not be downloaded": "{{count}} 本书籍下载失败",
+  "{{count}} book(s) could not be downloaded_other": "{{count}} 本书籍下载失败"
 }

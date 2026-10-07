@@ -98,19 +98,24 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
   updateBooks: async (envConfig, books, options) => {
     if (books.length === 0) return;
-    let { library, libraryLoaded } = get();
     const appService = await envConfig.getAppService();
-    if (!libraryLoaded) {
-      library = await appService.loadLibraryBooks();
-      libraryLoaded = true;
+    const diskBooks = get().libraryLoaded ? [] : await appService.loadLibraryBooks();
+    const merged = new Map([...diskBooks, ...get().library].map((book) => [book.hash, book]));
+    for (const book of books) {
+      const current = merged.get(book.hash);
+      if (
+        !current ||
+        Math.max(current.updatedAt ?? current.lastUpdated ?? 0, current.deletedAt ?? 0) <=
+          Math.max(book.updatedAt ?? 0, book.deletedAt ?? 0)
+      ) {
+        merged.set(book.hash, book);
+      }
     }
-    const updated = Array.from(
-      new Map([...library, ...books].map((book) => [book.hash, book])).values(),
-    );
+    const updated = Array.from(merged.values());
     set({
       library: updated,
       visibleLibrary: visibleBooks(updated),
-      libraryLoaded,
+      libraryLoaded: true,
       hashIndex: buildHashIndex(updated),
     });
     if (!options?.skipSave) await appService.saveLibraryBooks(updated);

@@ -100,9 +100,11 @@ const Dropdown: React.FC<DropdownProps> = ({
       content.style.top = '';
       content.style.bottom = '';
       content.style.marginBottom = '';
+      content.style.maxHeight = `${Math.max(0, window.innerHeight - 2 * MENU_VIEWPORT_PADDING)}px`;
+      content.style.overflowY = 'auto';
       const toggleButton = containerRef.current?.querySelector('button');
       const buttonRect = toggleButton?.getBoundingClientRect();
-      const rect = content.getBoundingClientRect();
+      let rect = content.getBoundingClientRect();
       let dx = 0;
       let dy = 0;
 
@@ -126,11 +128,18 @@ const Dropdown: React.FC<DropdownProps> = ({
             content.style.top = 'auto';
             content.style.bottom = '100%';
             content.style.marginBottom = '0.5rem';
+            rect = content.getBoundingClientRect();
           } else if (rect.bottom > window.innerHeight - MENU_VIEWPORT_PADDING) {
             // Otherwise shift up to fit
             dy = window.innerHeight - MENU_VIEWPORT_PADDING - rect.bottom;
           }
         }
+      }
+      if (rect.top + dy < MENU_VIEWPORT_PADDING) {
+        dy = MENU_VIEWPORT_PADDING - rect.top;
+      }
+      if (rect.bottom + dy > window.innerHeight - MENU_VIEWPORT_PADDING) {
+        dy = window.innerHeight - MENU_VIEWPORT_PADDING - rect.bottom;
       }
 
       if (dx !== 0 || dy !== 0) {
@@ -156,6 +165,8 @@ const Dropdown: React.FC<DropdownProps> = ({
       content.style.bottom = '';
       content.style.marginBottom = '';
       content.style.removeProperty('--dropdown-arrow-x');
+      content.style.maxHeight = '';
+      content.style.overflowY = '';
       delete content.dataset['dropdownAnchored'];
     };
   }, [isOpen]);

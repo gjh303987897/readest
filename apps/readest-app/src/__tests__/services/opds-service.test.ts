@@ -158,3 +158,68 @@ describe('OPDS 1 catalog support', () => {
     expect(file.size).toBe(3);
   });
 });
+
+it('accepts OPDS MIME parameters regardless of their order or spacing', () => {
+  const feed =
+    '<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>All Books</title><link href="/all" type="application/atom+xml; type=feed; profile=&quot;opds-catalog&quot;; kind = acquisition"/></entry></feed>';
+  expect(parseOpdsFeed(feed, 'https://books.example.com/opds').navigation).toEqual([
+    { title: 'All Books', url: 'https://books.example.com/all', acquisition: true },
+  ]);
+});
+
+it('stops distinct pagination URLs at the page budget and exposes truncation', async () => {
+  let calls = 0;
+  const fetcher = vi.fn(async () => {
+    calls++;
+    return new Response(
+      '<feed xmlns="http://www.w3.org/2005/Atom"><title>Books</title><link rel="next" href="?page=' +
+        (calls + 1) +
+        '"/><entry><id>book-' +
+        calls +
+        '</id><title>Book</title><link rel="http://opds-spec.org/acquisition" href="/book.epub"/></entry></feed>',
+    );
+  });
+  const result = await loadOpdsPublications('https://books.example.com/opds', {}, fetcher);
+  expect(calls).toBe(100);
+  expect(result.truncated).toBe(true);
+  expect(result.publications).toHaveLength(100);
+});
+
+it('aborts a stalled catalog request after its deadline', async () => {
+  vi.useFakeTimers();
+  try {
+    const fetcher = (_input: string | URL | Request, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    const rejected = expect(
+      loadOpdsPublications('https://books.example.com/opds', {}, fetcher),
+    ).rejects.toThrow('aborted');
+    await vi.advanceTimersByTimeAsync(30000);
+    await rejected;
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('propagates cancellation into the HTTP request', async () => {
+  const controller = new AbortController();
+  const fetcher = (_input: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener(
+        'abort',
+        () => reject(new DOMException('cancelled', 'AbortError')),
+        { once: true },
+      );
+    });
+  const rejected = expect(
+    loadOpdsPublications('https://books.example.com/opds', {}, fetcher, controller.signal),
+  ).rejects.toThrow('cancelled');
+  controller.abort();
+  await rejected;
+});

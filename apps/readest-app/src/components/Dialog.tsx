@@ -62,7 +62,7 @@ const Dialog: React.FC<DialogProps> = ({
   const { systemUIVisible, statusBarHeight, safeAreaInsets } = useThemeStore();
   const { acquireBackKeyInterception, releaseBackKeyInterception } = useDeviceControlStore();
   const [isFullHeightInMobile, setIsFullHeightInMobile] = useState(!snapHeight);
-  const [isRtl] = useState(() => getDirFromUILanguage() === 'rtl');
+  const isRtl = getDirFromUILanguage() === 'rtl';
   const dialogRef = useRef<HTMLDialogElement>(null);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const dragDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,7 +87,33 @@ const Dialog: React.FC<DialogProps> = ({
       }
     } else {
       if (event.key === 'Escape') {
+        event.preventDefault();
         requestClose();
+      }
+      const dialog = dialogRef.current;
+      if (event.key === 'Tab' && dialog) {
+        const focusable = Array.from(
+          dialog.querySelectorAll<HTMLElement>(
+            'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter(
+          (element) =>
+            element.tabIndex >= 0 &&
+            !element.closest('[hidden], [inert]') &&
+            getComputedStyle(element).display !== 'none' &&
+            getComputedStyle(element).visibility !== 'hidden',
+        );
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (
+          !first ||
+          (event.shiftKey
+            ? document.activeElement === first || document.activeElement === dialog
+            : document.activeElement === last || document.activeElement === dialog)
+        ) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        }
       }
       event.stopPropagation();
     }
@@ -147,12 +173,15 @@ const Dialog: React.FC<DialogProps> = ({
     }
 
     previousActiveElementRef.current = document.activeElement as HTMLElement;
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) {
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.open = true; // DOM test environments without native dialog support.
+    }
 
     setIsFullHeightInMobile(!snapHeight && isMobile);
     window.addEventListener('keydown', handleKeyDown);
-    if (dialogRef.current) {
-      dialogRef.current.addEventListener('keydown', handleKeyDown);
-    }
+    dialog?.addEventListener('keydown', handleKeyDown);
 
     // Register back button handler with navigation stack
     let unregisterNav: (() => void) | null = null;
@@ -175,6 +204,8 @@ const Dialog: React.FC<DialogProps> = ({
     return () => {
       clearTimeout(timer);
       window.removeEventListener('keydown', handleKeyDown);
+      dialog?.removeEventListener('keydown', handleKeyDown);
+      if (dialog?.open && typeof dialog.close === 'function') dialog.close();
       if (appService?.isAndroidApp) {
         releaseBackKeyInterception();
         unregisterNav?.();
@@ -268,14 +299,18 @@ const Dialog: React.FC<DialogProps> = ({
       ref={dialogRef}
       id={id ?? 'dialog'}
       tabIndex={-1}
-      open={shouldRender}
+      aria-modal='true'
+      onCancel={(event) => {
+        event.preventDefault();
+        requestClose();
+      }}
       aria-label={title}
       aria-hidden={!shouldRender}
       className={clsx(
-        'modal sm:min-w-90 z-50 h-full w-full !items-start !bg-transparent sm:w-full sm:!items-center',
+        'modal dialog-root sm:min-w-90 z-50 h-full w-full !items-start !bg-transparent sm:w-full sm:!items-center',
         className,
       )}
-      dir={isRtl ? 'rtl' : undefined}
+      dir={isRtl ? 'rtl' : 'ltr'}
     >
       <Overlay
         captureBlocking={shouldRender}

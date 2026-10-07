@@ -39,7 +39,7 @@ class NavigationStack {
    */
   handleBack(): boolean {
     // Try handlers from highest to lowest priority
-    for (const entry of this.stack) {
+    for (const entry of [...this.stack]) {
       if (entry.handler()) {
         return true; // Handler consumed the back action
       }

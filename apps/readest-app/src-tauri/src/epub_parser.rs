@@ -495,26 +495,35 @@ fn read_zip_entry<R: Read + Seek>(zip: &mut ZipArchive<R>, path: &str) -> Result
     // while the zip itself stores the raw decoded bytes — or vice versa.
     // We try the literal path first (the common case), then fall back to a
     // percent-decoded variant if it differs.
-    if let Ok(bytes) = read_by_name(zip, path) {
-        return Ok(bytes);
+    if zip.index_for_name(path).is_some() {
+        return read_by_name(zip, path);
     }
     let decoded = percent_decode(path.as_bytes()).decode_utf8_lossy();
-    if decoded.as_ref() != path {
-        if let Ok(bytes) = read_by_name(zip, decoded.as_ref()) {
-            return Ok(bytes);
-        }
+    if decoded.as_ref() != path && zip.index_for_name(decoded.as_ref()).is_some() {
+        return read_by_name(zip, decoded.as_ref());
     }
     Err(format!("entry {path}: not found"))
 }
 
 fn read_by_name<R: Read + Seek>(zip: &mut ZipArchive<R>, name: &str) -> Result<Vec<u8>, String> {
-    let mut entry = zip
+    let entry = zip
         .by_name(name)
         .map_err(|e| format!("entry {name}: {e}"))?;
-    let mut buf = Vec::with_capacity(entry.size() as usize);
+    // Metadata and covers should not require unbounded decompression or trust ZIP size headers.
+    const MAX_ENTRY_BYTES: u64 = 64 * 1024 * 1024;
+    if entry.size() > MAX_ENTRY_BYTES {
+        return Err(format!("entry {name}: exceeds the 64 MiB limit"));
+    }
+    let mut buf = Vec::new();
+    buf.try_reserve(entry.size() as usize)
+        .map_err(|e| format!("entry {name}: cannot allocate buffer: {e}"))?;
     entry
+        .take(MAX_ENTRY_BYTES + 1)
         .read_to_end(&mut buf)
         .map_err(|e| format!("read {name}: {e}"))?;
+    if buf.len() as u64 > MAX_ENTRY_BYTES {
+        return Err(format!("entry {name}: exceeds the 64 MiB limit"));
+    }
     Ok(buf)
 }
 
@@ -876,6 +885,26 @@ mod tests {
     use md5::{Digest, Md5};
     use std::collections::HashMap;
     use std::io::Cursor;
+
+    #[test]
+    fn rejects_oversized_declared_zip_entry_without_allocating_it() {
+        use std::io::Write;
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file("oversized.xml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"tiny").unwrap();
+        let mut data = writer.finish().unwrap().into_inner();
+        let central = data
+            .windows(4)
+            .position(|bytes| bytes == b"PK\x01\x02")
+            .unwrap();
+        data[central + 24..central + 28].copy_from_slice(&(64u32 * 1024 * 1024 + 1).to_le_bytes());
+        let mut archive = ZipArchive::new(Cursor::new(data)).unwrap();
+        assert!(read_by_name(&mut archive, "oversized.xml")
+            .unwrap_err()
+            .contains("limit"));
+    }
 
     #[test]
     fn parse_opf_cover_inputs_extracts_manifest_and_legacy_cover_id() {

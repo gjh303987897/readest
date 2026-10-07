@@ -9,12 +9,14 @@ interface PrivacyUnlockDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onUnlocked?: () => void;
+  requirePin?: boolean;
 }
 
 const PrivacyUnlockDialog: React.FC<PrivacyUnlockDialogProps> = ({
   isOpen,
   onClose,
   onUnlocked,
+  requirePin = false,
 }) => {
   const _ = useTranslation();
   const unlock = usePrivacyStore((state) => state.unlock);
@@ -29,7 +31,8 @@ const PrivacyUnlockDialog: React.FC<PrivacyUnlockDialogProps> = ({
     if (!isOpen) return;
     setPin('');
     setError('');
-    setTimeout(() => inputRef.current?.focus(), 120);
+    const timer = setTimeout(() => inputRef.current?.focus(), 120);
+    return () => clearTimeout(timer);
   }, [isOpen]);
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -98,7 +101,7 @@ const PrivacyUnlockDialog: React.FC<PrivacyUnlockDialogProps> = ({
         />
         {error && <p className='text-error text-center text-sm'>{error}</p>}
         <div className='flex justify-end gap-2'>
-          {biometricEnabled && (
+          {biometricEnabled && !requirePin && (
             <button
               type='button'
               className='btn btn-ghost eink-bordered'

@@ -177,28 +177,35 @@ const PrivacyPanel: React.FC<SettingsPanelPanelProp> = ({ onRegisterReset }) => 
       return;
     }
     setBusy(true);
-    let accepted = true;
-    if (hasPin) {
-      accepted = await changePin(currentPin, nextPin);
-    } else {
-      await setPin(nextPin);
+    try {
+      let accepted = true;
+      if (hasPin) accepted = await changePin(currentPin, nextPin);
+      else await setPin(nextPin);
+      if (accepted) {
+        setStatus(_('Privacy PIN saved'));
+        clearFields();
+      } else showPinError('current', _('Incorrect PIN'));
+    } catch {
+      setStatus(_('Failed to save privacy PIN'));
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
-    if (accepted) {
-      setStatus(_('Privacy PIN saved'));
-      clearFields();
-    } else showPinError('current', _('Incorrect PIN'));
   };
 
   const disablePrivacyMode = async () => {
     if (busy) return;
     setBusy(true);
-    const accepted = await removePin(currentPin);
-    setBusy(false);
-    if (accepted) {
-      setStatus(_('Privacy mode disabled'));
-      clearFields();
-    } else showPinError('current', _('Incorrect PIN'));
+    try {
+      const accepted = await removePin(currentPin);
+      if (accepted) {
+        setStatus(_('Privacy mode disabled'));
+        clearFields();
+      } else showPinError('current', _('Incorrect PIN'));
+    } catch {
+      setStatus(_('Failed to disable Privacy Mode'));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const unlockPrivacyMode = async () => {

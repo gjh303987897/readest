@@ -37,6 +37,7 @@ class TransferManager {
   private _: TranslationFunc | null = null;
   private quotaFailureCount = 0;
   private quotaToastTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryAfter = new Map<string, number>();
 
   private constructor() {}
 
@@ -59,7 +60,7 @@ class TransferManager {
     this.getLibrary = getLibrary;
     this.updateBook = updateBook;
     this._ = translationFn;
-    await this.loadPersistedQueue();
+    this.loadPersistedQueue();
     this.isInitialized = true;
 
     // Start processing queue
@@ -71,11 +72,7 @@ class TransferManager {
   }
 
   queueUpload(book: Book, priority: number = 10): string | null {
-    if (!this.isReady()) {
-      console.warn('TransferManager not initialized');
-      return null;
-    }
-
+    if (!this.isReady()) this.loadPersistedQueue();
     const store = useTransferStore.getState();
 
     // Check if already queued or in progress
@@ -146,6 +143,7 @@ class TransferManager {
   }
 
   retryTransfer(transferId: string): void {
+    this.retryAfter.delete(transferId);
     const store = useTransferStore.getState();
     store.retryTransfer(transferId);
     this.persistQueue();
@@ -156,6 +154,7 @@ class TransferManager {
     const store = useTransferStore.getState();
     const failed = store.getFailedTransfers();
     failed.forEach((transfer) => {
+      this.retryAfter.delete(transfer.id);
       store.retryTransfer(transfer.id);
     });
     this.persistQueue();
@@ -189,12 +188,13 @@ class TransferManager {
   }
 
   clearAll(): void {
+    this.retryAfter.clear();
     useTransferStore.getState().clearAll();
     this.persistQueue();
   }
 
   private async processQueue(): Promise<void> {
-    if (this.isProcessing) return;
+    if (!this.isReady() || this.isProcessing) return;
 
     this.isProcessing = true;
 
@@ -210,7 +210,9 @@ class TransferManager {
 
     if (store.isQueuePaused) return;
 
-    const pending = store.getPendingTransfers();
+    const pending = store
+      .getPendingTransfers()
+      .filter((transfer) => (this.retryAfter.get(transfer.id) ?? 0) <= Date.now());
     const activeCount = store.getActiveTransfers().length;
     const maxConcurrent = store.maxConcurrent;
 
@@ -230,7 +232,15 @@ class TransferManager {
     const newStore = useTransferStore.getState();
     const processable = newStore.getPendingTransfers();
     if (processable.length > 0 && !newStore.isQueuePaused) {
-      setTimeout(() => this.processQueue(), 100);
+      const delay = Math.max(
+        100,
+        Math.min(
+          ...processable.map(
+            (transfer) => (this.retryAfter.get(transfer.id) ?? Date.now()) - Date.now(),
+          ),
+        ),
+      );
+      setTimeout(() => this.processQueue(), delay);
     }
   }
 
@@ -246,7 +256,7 @@ class TransferManager {
     this.abortControllers.set(transfer.id, abortController);
 
     store.setTransferStatus(transfer.id, 'in_progress');
-    store.setActiveCount(store.getActiveTransfers().length + 1);
+    store.setActiveCount(store.getActiveTransfers().length);
 
     const progressThrottle = createProgressThrottle((progress) => {
       const percentage = progress.total > 0 ? (progress.progress / progress.total) * 100 : 0;
@@ -272,6 +282,7 @@ class TransferManager {
       // Land the final progress value that the throttle may still be holding.
       progressThrottle.flush();
       useTransferStore.getState().setTransferStatus(transfer.id, 'completed');
+      this.retryAfter.delete(transfer.id);
 
       const messages = getTransferMessages(transfer, _);
 
@@ -303,6 +314,7 @@ class TransferManager {
       ) {
         // Schedule retry with exponential backoff
         const delay = RETRY_DELAY_BASE_MS * Math.pow(2, currentTransfer.retryCount);
+        this.retryAfter.set(transfer.id, Date.now() + delay);
         currentStore.incrementRetryCount(transfer.id);
         currentStore.setTransferStatus(
           transfer.id,
@@ -341,9 +353,6 @@ class TransferManager {
       const currentStore = useTransferStore.getState();
       currentStore.setActiveCount(Math.max(0, currentStore.getActiveTransfers().length));
       this.persistQueue();
-
-      // Continue processing
-      setTimeout(() => this.processQueue(), 100);
     }
   }
 
@@ -396,7 +405,7 @@ class TransferManager {
     }
   }
 
-  private async loadPersistedQueue(): Promise<void> {
+  private loadPersistedQueue(): void {
     try {
       if (typeof localStorage === 'undefined') return;
 

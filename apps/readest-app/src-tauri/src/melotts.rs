@@ -2,12 +2,18 @@ use serde::{Deserialize, Serialize};
 use std::{
     env,
     fs::{self, OpenOptions},
-    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
-    sync::{Arc, Mutex},
+    process::Stdio,
+    sync::Arc,
 };
 use tauri::{AppHandle, Manager, State};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::{Child, ChildStdin, ChildStdout, Command},
+    sync::Mutex,
+};
+const SYNTHESIS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 const MODEL_DIRECTORY: &str = "Readest/TTS/MeloTTS";
 const SUPPORTED_LANGUAGES: [&str; 6] = ["EN", "ES", "FR", "ZH", "JP", "KR"];
@@ -154,6 +160,7 @@ impl MeloProcess {
 
         let mut command = Command::new(python_command(&runtime_dir));
         command
+            .kill_on_drop(true)
             .arg("-u")
             .arg(script_path)
             .stdin(Stdio::piped())
@@ -169,7 +176,6 @@ impl MeloProcess {
 
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
         }
 
@@ -194,19 +200,26 @@ impl MeloProcess {
         })
     }
 
-    fn synthesize(&mut self, request: &RuntimeRequest<'_>) -> Result<String, String> {
+    async fn synthesize(&mut self, request: &RuntimeRequest<'_>) -> Result<String, String> {
         let line = serde_json::to_string(request)
             .map_err(|error| format!("Cannot encode the MeloTTS request: {error}"))?;
         self.stdin
             .write_all(line.as_bytes())
-            .and_then(|_| self.stdin.write_all(b"\n"))
-            .and_then(|_| self.stdin.flush())
+            .await
             .map_err(|error| format!("Cannot send text to the MeloTTS runtime: {error}"))?;
-
+        self.stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|error| format!("Cannot send text to the MeloTTS runtime: {error}"))?;
+        self.stdin
+            .flush()
+            .await
+            .map_err(|error| format!("Cannot flush the MeloTTS request: {error}"))?;
         let mut response = String::new();
         let bytes_read = self
             .stdout
             .read_line(&mut response)
+            .await
             .map_err(|error| format!("Cannot read the MeloTTS response: {error}"))?;
         if bytes_read == 0 {
             let details = log_tail(&self.log_path);
@@ -218,21 +231,10 @@ impl MeloProcess {
         }
         parse_runtime_response(response.trim())
     }
-
-    fn exited(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(Some(_)))
-    }
-}
-
-impl Drop for MeloProcess {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 impl MeloTtsState {
-    fn synthesize(
+    async fn synthesize(
         &self,
         app: &AppHandle,
         language_code: &str,
@@ -283,29 +285,38 @@ impl MeloTtsState {
             speed,
             device,
         };
-        let mut process = self
-            .process
-            .lock()
-            .map_err(|_| "MeloTTS runtime state is unavailable".to_string())?;
+        let mut process = tokio::time::timeout(SYNTHESIS_TIMEOUT, self.process.lock())
+            .await
+            .map_err(|_| "MeloTTS runtime is busy; try again".to_string())?;
         if process.is_none() {
             *process = Some(MeloProcess::start(app)?);
         }
-        let result = process
-            .as_mut()
-            .ok_or_else(|| "MeloTTS runtime failed to start".to_string())?
-            .synthesize(&request);
-        if result.is_err() && process.as_mut().is_some_and(MeloProcess::exited) {
-            process.take();
+        let result = tokio::time::timeout(
+            SYNTHESIS_TIMEOUT,
+            process
+                .as_mut()
+                .ok_or_else(|| "MeloTTS runtime failed to start".to_string())?
+                .synthesize(&request),
+        )
+        .await
+        .unwrap_or_else(|_| Err("MeloTTS synthesis timed out".to_string()));
+        if result.is_err() {
+            if let Some(mut failed) = process.take() {
+                let _ = failed.child.kill().await;
+            }
         }
         result
     }
 
-    fn release(&self) -> Result<(), String> {
-        let mut process = self
-            .process
-            .lock()
-            .map_err(|_| "MeloTTS runtime state is unavailable".to_string())?;
-        process.take();
+    async fn release(&self) -> Result<(), String> {
+        let mut process = self.process.lock().await;
+        if let Some(mut child) = process.take() {
+            child
+                .child
+                .kill()
+                .await
+                .map_err(|e| format!("Cannot stop MeloTTS runtime: {e}"))?;
+        }
         Ok(())
     }
 }
@@ -321,24 +332,63 @@ pub async fn melotts_synthesize(
 ) -> Result<String, String> {
     let state = state.inner().clone();
     let device = device.unwrap_or_else(|| "cpu".to_string());
-    tauri::async_runtime::spawn_blocking(move || {
-        state.synthesize(&app, &language_code, &text, speed.unwrap_or(1.0), &device)
-    })
-    .await
-    .map_err(|error| format!("MeloTTS worker failed: {error}"))?
+    state
+        .synthesize(&app, &language_code, &text, speed.unwrap_or(1.0), &device)
+        .await
 }
 
 #[tauri::command]
 pub async fn melotts_release(state: State<'_, MeloTtsState>) -> Result<(), String> {
     let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.release())
-        .await
-        .map_err(|error| format!("MeloTTS worker failed: {error}"))?
+    state.release().await
 }
 
 #[cfg(test)]
 mod tests {
     use super::{parse_runtime_response, validate_device, validate_speed};
+
+    #[cfg(windows)]
+    #[test]
+    fn stalled_runtime_io_can_be_cancelled_and_process_reaped() {
+        use super::*;
+        tauri::async_runtime::block_on(async {
+            let mut child = Command::new("powershell.exe")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "$null = [Console]::ReadLine(); [Threading.Thread]::Sleep(30000)",
+                ])
+                .creation_flags(0x08000000)
+                .kill_on_drop(true)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut process = MeloProcess {
+                stdin: child.stdin.take().unwrap(),
+                stdout: BufReader::new(child.stdout.take().unwrap()),
+                child,
+                log_path: std::env::temp_dir().join("readest-no-runtime-log"),
+            };
+            let root = std::env::temp_dir();
+            let request = RuntimeRequest {
+                language_code: "EN",
+                text: "fixture",
+                model_dir: &root,
+                speed: 1.0,
+                device: "cpu",
+            };
+            assert!(tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                process.synthesize(&request)
+            )
+            .await
+            .is_err());
+            process.child.kill().await.unwrap();
+            assert!(process.child.try_wait().unwrap().is_some());
+        });
+    }
 
     #[test]
     fn parses_successful_audio_response() {

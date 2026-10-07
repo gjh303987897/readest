@@ -1,6 +1,6 @@
+use crate::filesystem_scope::is_path_allowed;
 use std::path::Path;
 use tauri::AppHandle;
-use tauri_plugin_fs::FsExt;
 use walkdir::WalkDir;
 
 #[derive(serde::Serialize)]
@@ -16,10 +16,9 @@ pub fn read_dir(
     recursive: bool,
     extensions: Vec<String>,
 ) -> Result<Vec<ScannedFile>, String> {
-    let scope = app.fs_scope();
     let path_buf = std::path::PathBuf::from(&path);
 
-    if !scope.is_allowed(&path_buf) && !path_buf.to_string_lossy().contains("Readest") {
+    if !is_path_allowed(&app, &path_buf) {
         return Err("Permission denied: Path not in filesystem scope".to_string());
     }
 
@@ -29,10 +28,13 @@ pub fn read_dir(
         extensions.iter().map(|ext| ext.to_lowercase()).collect();
 
     if recursive {
-        for entry_result in WalkDir::new(&path).into_iter() {
+        for entry_result in WalkDir::new(&path)
+            .into_iter()
+            .filter_entry(|entry| is_path_allowed(&app, entry.path()))
+        {
             match entry_result {
                 Ok(entry) => {
-                    if entry.file_type().is_file() {
+                    if entry.file_type().is_file() && is_path_allowed(&app, entry.path()) {
                         if let Some(scanned_file) =
                             process_file_entry(entry.path(), &normalized_extensions)
                         {
@@ -52,7 +54,7 @@ pub fn read_dir(
                     match entry_result {
                         Ok(entry) => {
                             let path = entry.path();
-                            if path.is_file() {
+                            if path.is_file() && is_path_allowed(&app, &path) {
                                 if let Some(scanned_file) =
                                     process_file_entry(&path, &normalized_extensions)
                                 {

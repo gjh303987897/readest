@@ -130,3 +130,32 @@ describe('PrivacyPanel PIN input', () => {
     expect(privacy.changePin).toHaveBeenCalledWith('1111', '2222');
   });
 });
+
+it('restores PIN inputs after a crypto or storage failure', async () => {
+  privacy.setPin.mockRejectedValueOnce(new Error('storage failed'));
+  openPanel();
+  enter('PIN', '1234');
+  enter('Confirm PIN', '1234');
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() =>
+    expect(screen.getByRole('status').textContent).toBe('Failed to save privacy PIN'),
+  );
+  expect((screen.getByLabelText('PIN', { exact: true }) as HTMLInputElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Privacy PIN saved'));
+});
+
+it('restores controls after removing a PIN fails', async () => {
+  privacy.hasPin = true;
+  privacy.isUnlocked = true;
+  privacy.removePin.mockRejectedValueOnce(new Error('storage failed'));
+  openPanel();
+  enter('Current PIN', '1234');
+  fireEvent.click(screen.getByRole('button', { name: 'Disable' }));
+  await waitFor(() =>
+    expect(screen.getByRole('status').textContent).toBe('Failed to disable Privacy Mode'),
+  );
+  expect((screen.getByLabelText('Current PIN', { exact: true }) as HTMLInputElement).disabled).toBe(
+    false,
+  );
+});

@@ -130,3 +130,19 @@ describe('Dropdown pointer alignment', () => {
     expect(menu.style.getPropertyValue('--dropdown-arrow-x')).toBe('116px');
   });
 });
+
+it('clamps a menu that starts above the viewport', () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.classList.contains('dropdown-toggle')
+      ? new DOMRect(200, 20, 32, 32)
+      : new DOMRect(100, -40, 200, 100);
+  });
+  renderDropdown();
+  fireEvent.click(screen.getByRole('button', { name: 'Test Menu' }));
+  const menu = document.querySelector<HTMLElement>('.dropdown-content')!;
+  expect(menu.style.transform).toBe('translate(0px, 56px)');
+  expect(menu.style.maxHeight).toBe(window.innerHeight - 32 + 'px');
+  expect(menu.style.overflowY).toBe('auto');
+});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Book } from '@/types/book';
 import { useSync } from '@/hooks/useSync';
 import { useEnv } from '@/context/EnvContext';
@@ -72,25 +72,28 @@ export const useBooksSync = () => {
     [_, user, libraryLoaded, syncBooks],
   );
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const handleAutoSync = useCallback(
-    throttle(
-      async () => {
-        if (isPullingRef.current) return;
-        const newBooks = getNewBooks();
-        if (!newBooks.books?.length) return;
-        isPullingRef.current = true;
-        try {
-          await syncBooks(newBooks.books, 'both');
-        } finally {
-          isPullingRef.current = false;
-        }
-      },
-      SYNC_BOOKS_INTERVAL_SEC * 1000,
-      { emitLast: true },
-    ),
-    [syncBooks],
+  const autoSyncRef = useRef(async () => {});
+  autoSyncRef.current = async () => {
+    if (isPullingRef.current) return;
+    const newBooks = getNewBooks();
+    if (!newBooks.books?.length) return;
+    isPullingRef.current = true;
+    try {
+      await syncBooks(newBooks.books, 'both');
+    } catch (error) {
+      console.error('Automatic book sync failed:', error);
+    } finally {
+      isPullingRef.current = false;
+    }
+  };
+  const handleAutoSync = useMemo(
+    () =>
+      throttle(() => void autoSyncRef.current(), SYNC_BOOKS_INTERVAL_SEC * 1000, {
+        emitLast: true,
+      }),
+    [],
   );
+  useEffect(() => () => handleAutoSync.cancel(), [handleAutoSync]);
 
   useEffect(() => {
     if (!user) return;
@@ -108,118 +111,102 @@ export const useBooksSync = () => {
 
   useEffect(() => {
     if (!user || !useSyncInited || !libraryLoaded) return;
-    pullLibrary();
+    void pullLibrary().catch((error) => {
+      console.error('Initial library sync failed:', error);
+      eventDispatcher.dispatch('toast', { type: 'error', message: _('Failed to sync books') });
+    });
   }, [user, useSyncInited, libraryLoaded, pullLibrary]);
 
-  const updateLibrary = useCallback(async () => {
-    if (!syncedBooks?.length) return;
+  const updateLibrary = useCallback(
+    async (signal: AbortSignal) => {
+      if (!syncedBooks?.length || !appService) return;
+      const cloudBooks = [...syncedBooks].sort((a, b) => a.updatedAt - b.updatedAt);
+      const snapshot = new Map(useLibraryStore.getState().library.map((book) => [book.hash, book]));
+      const syncedByHash = new Map(cloudBooks.map((book) => [book.hash, book]));
+      const existing = [...snapshot.values()].filter((book) => syncedByHash.has(book.hash));
+      const refresh = existing.filter((book) =>
+        needsCoverRefresh(book, syncedByHash.get(book.hash)!),
+      );
+      const additions = cloudBooks.filter(
+        (book) => !snapshot.has(book.hash) && book.uploadedAt && !book.deletedAt,
+      );
+      const refreshed = new Map<string, Book>();
+      const prepared = new Map<string, Book>();
 
-    const cloudBooks = syncedBooks;
-    if (!cloudBooks.length) return;
-
-    // Process old books first so that when we update the library the order is preserved
-    cloudBooks.sort((a, b) => a.updatedAt - b.updatedAt);
-    const bookHashesInSynced = new Set(cloudBooks.map((book) => book.hash));
-    const syncedByHash = new Map(cloudBooks.map((book) => [book.hash, book]));
-    const liveLibrary = useLibraryStore.getState().library;
-    const oldBooks = liveLibrary.filter((book) => bookHashesInSynced.has(book.hash));
-    // Books whose cover must be (re)fetched: never-downloaded, or a newer cover
-    // edit arrived from another device (issue #4544). Captured before the
-    // download loop so the post-download merge can still tell which covers were
-    // refreshed (the loop mutates coverDownloadedAt).
-    const oldBooksNeedsDownload = oldBooks.filter((book) => {
-      const matchingBook = syncedByHash.get(book.hash);
-      return !!matchingBook && needsCoverRefresh(book, matchingBook);
-    });
-    const coverRefreshHashes = new Set(oldBooksNeedsDownload.map((book) => book.hash));
-
-    const processOldBook = async (oldBook: Book) => {
-      const matchingBook = syncedByHash.get(oldBook.hash);
-      if (matchingBook) {
-        if (coverRefreshHashes.has(oldBook.hash)) {
-          oldBook.coverImageUrl = await appService?.generateCoverImageUrl(oldBook);
-        }
-        const mergedBook =
-          matchingBook.updatedAt >= oldBook.updatedAt
-            ? { ...oldBook, ...matchingBook, syncedAt: Date.now() }
-            : { ...matchingBook, ...oldBook, syncedAt: Date.now() };
-        const cover = pickFresherCover(oldBook, matchingBook);
-        mergedBook.coverHash = cover.coverHash;
-        mergedBook.coverUpdatedAt = cover.coverUpdatedAt;
-        return mergedBook;
-      }
-      return oldBook;
-    };
-
-    const oldBooksBatchSize = 100;
-    for (let i = 0; i < oldBooksNeedsDownload.length; i += oldBooksBatchSize) {
-      const batch = oldBooksNeedsDownload.slice(i, i + oldBooksBatchSize);
-      await appService?.downloadBookCovers(batch);
-    }
-
-    const updatedLibrary = await Promise.all(liveLibrary.map(processOldBook));
-    setLibrary(updatedLibrary);
-    appService?.saveLibraryBooks(updatedLibrary);
-
-    const bookHashesInLibrary = new Set(updatedLibrary.map((book) => book.hash));
-    const newBooks = cloudBooks.filter(
-      (newBook) =>
-        !bookHashesInLibrary.has(newBook.hash) && newBook.uploadedAt && !newBook.deletedAt,
-    );
-
-    const processNewBook = async (newBook: Book) => {
-      newBook.coverImageUrl = await appService?.generateCoverImageUrl(newBook);
-      newBook.syncedAt = Date.now();
-      updatedLibrary.push(newBook);
-    };
-
-    if (newBooks.length > 0) {
+      // Download methods annotate their arguments; give them copies instead of store objects.
+      const downloads = [...refresh, ...additions].map((book) => ({ ...book }));
       setIsSyncing(true);
-    }
-    try {
-      const batchSize = 10;
-      for (let i = 0; i < newBooks.length; i += batchSize) {
-        const batch = newBooks.slice(i, i + batchSize);
-        await appService?.downloadBookCovers(batch);
-        await Promise.all(batch.map(processNewBook));
-        const progress = Math.min((i + batchSize) / newBooks.length, 1);
-        setSyncProgress(progress);
-        setLibrary([...updatedLibrary]);
-        appService?.saveLibraryBooks(updatedLibrary);
+      try {
+        for (let i = 0; i < downloads.length; i += 20) {
+          if (signal.aborted) return;
+          const batch = downloads.slice(i, i + 20);
+          await appService.downloadBookCovers(batch);
+          if (signal.aborted) return;
+          for (const book of batch) {
+            refreshed.set(book.hash, {
+              ...book,
+              coverImageUrl: await appService.generateCoverImageUrl(book),
+            });
+          }
+          setSyncProgress(Math.min((i + 20) / downloads.length, 1));
+        }
+        if (signal.aborted) return;
+        for (const book of existing) {
+          const local = refreshed.get(book.hash) ?? book;
+          const cloud = syncedByHash.get(book.hash)!;
+          const merged =
+            Math.max(cloud.updatedAt, cloud.deletedAt ?? 0) >=
+            Math.max(local.updatedAt, local.deletedAt ?? 0)
+              ? { ...local, ...cloud, syncedAt: Date.now() }
+              : { ...cloud, ...local, syncedAt: Date.now() };
+          const cover = pickFresherCover(local, cloud);
+          prepared.set(book.hash, {
+            ...merged,
+            coverHash: cover.coverHash,
+            coverUpdatedAt: cover.coverUpdatedAt,
+            coverImageUrl: local.coverImageUrl,
+          });
+        }
+        for (const book of additions) {
+          prepared.set(book.hash, { ...(refreshed.get(book.hash) ?? book), syncedAt: Date.now() });
+        }
+        // Publish once, merging against the state after all awaits. Concurrent local edits win.
+        const latest = useLibraryStore.getState().library;
+        const latestHashes = new Set(latest.map((book) => book.hash));
+        const merged = latest.map((book) =>
+          book === snapshot.get(book.hash) ? (prepared.get(book.hash) ?? book) : book,
+        );
+        for (const [hash, book] of prepared) {
+          if (!snapshot.has(hash) && !latestHashes.has(hash)) merged.push(book);
+        }
+        setLibrary(merged);
+        await appService.saveLibraryBooks(merged);
+      } catch (error) {
+        if (!signal.aborted) {
+          console.error('Error updating synced books:', error);
+          eventDispatcher.dispatch('toast', { type: 'error', message: _('Failed to sync books') });
+        }
+      } finally {
+        if (!signal.aborted) setIsSyncing(false);
       }
-    } catch (err) {
-      console.error('Error updating new books:', err);
-    } finally {
-      if (newBooks.length > 0) {
-        setIsSyncing(false);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncedBooks]);
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const debouncedUpdateLibrary = useCallback(
-    debounce(() => updateLibrary(), 10000),
-    [updateLibrary],
+    },
+    [syncedBooks, appService, setIsSyncing, setSyncProgress, setLibrary, _],
   );
 
+  const debouncedUpdateLibrary = useMemo(() => debounce(updateLibrary, 10000), [updateLibrary]);
   useEffect(() => {
-    // Defer processing synced books until the library has been loaded from
-    // disk. Otherwise updateLibrary runs against an empty `library`
-    // closure, treats every synced book as new, and the resulting
-    // `setLibrary([only sync books])` can race with initLibrary's
-    // `setLibrary([disk books])` — the empty-merged save can land on disk
-    // afterwards and overwrite the loaded snapshot. The synced books stay
-    // queued in `syncedBooks` state; this effect re-fires when
-    // libraryLoaded flips to true and processes them then.
     if (!libraryLoaded) return;
-    if (isSyncing) {
-      debouncedUpdateLibrary();
-    } else {
-      updateLibrary();
-    }
+    const controller = new AbortController();
+    if (isSyncing) debouncedUpdateLibrary(controller.signal);
+    else void updateLibrary(controller.signal);
+    return () => {
+      controller.abort();
+      debouncedUpdateLibrary.cancel();
+      setIsSyncing(false);
+    };
+    // isSyncing chooses how to start; publishing our own state must not restart this job.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncedBooks, updateLibrary, debouncedUpdateLibrary, libraryLoaded]);
+  }, [updateLibrary, debouncedUpdateLibrary, libraryLoaded, setIsSyncing]);
 
   return { pullLibrary, pushLibrary };
 };

@@ -333,7 +333,7 @@ export const usePrivacyStore = create<PrivacyState>((set, get) => ({
   lock: () => {
     lockCurrentWindow();
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(LOCK_SIGNAL_KEY, crypto.randomUUID());
+      localStorage.setItem(LOCK_SIGNAL_KEY, `${Date.now()}-${Math.random().toString(36).slice(2)}`);
     }
   },
   hideBook: async (hash) => {

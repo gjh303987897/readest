@@ -2075,5 +2075,13 @@
   "Invalid server endpoint URL": "伺服器位址無效",
   "Endpoint must use HTTP or HTTPS": "伺服器位址必須使用 HTTP 或 HTTPS",
   "Endpoint returned invalid runtime configuration": "伺服器傳回的執行設定無效",
-  "Failed to load OPDS catalog": "載入 OPDS 目錄失敗"
+  "Failed to load OPDS catalog": "載入 OPDS 目錄失敗",
+  "Failed to load library": "書庫載入失敗",
+  "Failed to sync books": "書籍同步失敗",
+  "Failed to save privacy PIN": "隱私 PIN 儲存失敗，請重試",
+  "Failed to disable Privacy Mode": "關閉隱私模式失敗，請重試",
+  "Catalog limit reached. Only part of the catalog is shown.": "目錄達到載入上限，目前僅顯示部分書籍。",
+  "Failed to import books": "書籍匯入失敗",
+  "{{count}} book(s) could not be downloaded": "{{count}} 本書籍下載失敗",
+  "{{count}} book(s) could not be downloaded_other": "{{count}} 本書籍下載失敗"
 }

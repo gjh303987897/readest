@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookText,
   ChevronLeft,
@@ -75,9 +75,17 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState('');
+  const loadingController = useRef<AbortController | null>(null);
+  useEffect(() => () => loadingController.current?.abort(), []);
+  useEffect(() => {
+    if (!isOpen) loadingController.current?.abort();
+  }, [isOpen]);
 
   const handleClose = () => {
-    if (!downloading) onClose();
+    if (!downloading) {
+      loadingController.current?.abort();
+      onClose();
+    }
   };
 
   const credentials: OpdsCredentials = { username: username.trim(), password };
@@ -108,9 +116,14 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     setPassword(login.password ?? '');
     setLoading(true);
     setError('');
+    const controller = new AbortController();
+    loadingController.current = controller;
     try {
-      const loadedCatalog = await loadOpdsPublications(url, login);
+      const loadedCatalog = await loadOpdsPublications(url, login, undefined, controller.signal);
+      if (controller.signal.aborted) return;
       setCatalog(loadedCatalog);
+      if (loadedCatalog.truncated)
+        setError(_('Catalog limit reached. Only part of the catalog is shown.'));
       setSelected(new Set());
       setQuery('');
       if (remember) {
@@ -129,6 +142,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
         setSaveLogin(false);
       }
     } catch (loadError) {
+      if (controller.signal.aborted) return;
       setError(
         loadError instanceof Error ? _(loadError.message) : _('Failed to load OPDS catalog'),
       );
@@ -172,34 +186,45 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     setError('');
     setDownloadProgress({ current: 0, total: selectedPublications.length });
     const downloadedFiles: File[] = [];
-
-    for (let index = 0; index < selectedPublications.length; index += 1) {
-      const publication = selectedPublications[index]!;
-      setDownloadProgress({ current: index + 1, total: selectedPublications.length });
-      try {
-        const file = await downloadOpdsPublication(publication, credentials);
-        downloadedFiles.push(file);
-      } catch (downloadError) {
-        console.error('Failed to download OPDS publication', downloadError);
+    const failed = new Set<string>();
+    try {
+      for (let index = 0; index < selectedPublications.length; index += 1) {
+        const publication = selectedPublications[index]!;
+        setDownloadProgress({ current: index + 1, total: selectedPublications.length });
+        try {
+          downloadedFiles.push(await downloadOpdsPublication(publication, credentials));
+        } catch {
+          failed.add(publication.id);
+        }
       }
-    }
-
-    const imported = await onImportFiles(downloadedFiles);
-
-    setDownloading(false);
-    if (imported > 0) {
-      eventDispatcher.dispatch('toast', {
-        type: 'info',
-        message: _('{{count}} book(s) imported', { count: imported }),
-      });
-      setSelected(new Set());
-    }
-    if (imported !== downloadedFiles.length) {
+      const imported = downloadedFiles.length ? await onImportFiles(downloadedFiles) : 0;
+      if (imported > 0) {
+        eventDispatcher.dispatch('toast', {
+          type: 'info',
+          message: _('{{count}} book(s) imported', { count: imported }),
+        });
+      }
+      const messages = [];
+      if (failed.size)
+        messages.push(_('{{count}} book(s) could not be downloaded', { count: failed.size }));
+      if (imported < downloadedFiles.length) {
+        messages.push(
+          _('{{count}} book(s) could not be imported', {
+            count: downloadedFiles.length - imported,
+          }),
+        );
+      } else {
+        setSelected(failed);
+      }
+      setError(messages.join(' '));
+    } catch (importError) {
       setError(
-        _('{{count}} book(s) could not be imported', {
-          count: downloadedFiles.length - imported,
-        }),
+        importError instanceof Error
+          ? _('Failed to import books') + ': ' + importError.message
+          : _('Failed to import books'),
       );
+    } finally {
+      setDownloading(false);
     }
   };
 

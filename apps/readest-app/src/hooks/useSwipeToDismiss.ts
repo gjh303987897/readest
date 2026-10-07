@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 import { impactFeedback } from '@tauri-apps/plugin-haptics';
 import { useEnv } from '@/context/EnvContext';
@@ -15,6 +15,13 @@ export const useSwipeToDismiss = (
   const panelRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const panelHeight = useRef(1.0);
+  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (dismissTimer.current) clearTimeout(dismissTimer.current);
+    },
+    [],
+  );
 
   const handleVerticalDragMove = (data: { clientY: number }) => {
     const heightFraction = data.clientY / window.innerHeight;
@@ -48,7 +55,11 @@ export const useSwipeToDismiss = (
       panel.style.transform = 'translateY(100%)';
       overlay.style.transition = `opacity ${transitionDuration}s ease-out`;
       overlay.style.opacity = '0';
-      setTimeout(() => onDismiss(), 300);
+      if (dismissTimer.current) clearTimeout(dismissTimer.current);
+      dismissTimer.current = setTimeout(() => {
+        dismissTimer.current = null;
+        onDismiss();
+      }, 300);
       if (appService?.hasHaptics) {
         impactFeedback('medium');
       }

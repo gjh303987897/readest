@@ -122,10 +122,15 @@ describe('OPDS catalog dialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /^All Books/ }));
 
     expect(await screen.findByText('First Book')).toBeTruthy();
-    expect(loadOpdsPublications).toHaveBeenLastCalledWith('https://books.example.com/opds', {
-      username: 'alice',
-      password: 'secret',
-    });
+    expect(loadOpdsPublications).toHaveBeenLastCalledWith(
+      'https://books.example.com/opds',
+      {
+        username: 'alice',
+        password: 'secret',
+      },
+      undefined,
+      expect.any(AbortSignal),
+    );
   });
 
   it('keeps failed logins out of the saved list and lets users remove saved entries', async () => {
@@ -179,9 +184,50 @@ describe('OPDS catalog dialog', () => {
     expect(screen.getAllByRole('button', { name: /^All Books/ })).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: /^All Books/ }));
     expect(await screen.findByText('First Book')).toBeTruthy();
-    expect(loadOpdsPublications).toHaveBeenLastCalledWith('https://books.example.com/opds', {
-      username: 'alice',
-      password: 'new-password',
-    });
+    expect(loadOpdsPublications).toHaveBeenLastCalledWith(
+      'https://books.example.com/opds',
+      {
+        username: 'alice',
+        password: 'new-password',
+      },
+      undefined,
+      expect.any(AbortSignal),
+    );
   });
+});
+
+it('recovers from failed OPDS persistence and leaves retry available', async () => {
+  const importFiles = vi.fn().mockRejectedValue(new Error('disk full'));
+  render(<OpdsDialog isOpen onClose={() => {}} onImportFiles={importFiles} />);
+  fireEvent.change(screen.getByLabelText('Catalog URL'), {
+    target: { value: 'https://books.example.com/opds' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+  await screen.findByText('First Book');
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select all books' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Download selected' }));
+  expect(await screen.findByText('Failed to import books: disk full')).toBeTruthy();
+  expect(
+    (screen.getByRole('button', { name: 'Download selected' }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+});
+
+it('reports all download failures without attempting an empty import', async () => {
+  downloadOpdsPublication
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockRejectedValueOnce(new Error('offline'));
+  const importFiles = vi.fn();
+  render(<OpdsDialog isOpen onClose={() => {}} onImportFiles={importFiles} />);
+  fireEvent.change(screen.getByLabelText('Catalog URL'), {
+    target: { value: 'https://books.example.com/opds' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+  await screen.findByText('First Book');
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select all books' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Download selected' }));
+  expect(await screen.findByText('2 book(s) could not be downloaded')).toBeTruthy();
+  expect(importFiles).not.toHaveBeenCalled();
+  expect(
+    (screen.getByRole('button', { name: 'Download selected' }) as HTMLButtonElement).disabled,
+  ).toBe(false);
 });

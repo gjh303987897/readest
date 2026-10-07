@@ -39,6 +39,7 @@ export interface ParsedOpdsFeed {
 export interface OpdsCatalog {
   title: string;
   publications: OpdsPublication[];
+  truncated?: boolean;
 }
 
 export type OpdsFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -153,9 +154,26 @@ export const parseOpdsFeed = (xml: string, feedUrl: string): ParsedOpdsFeed => {
       const href = link.getAttribute('href');
       const relation = link.getAttribute('rel') ?? '';
       const type = link.getAttribute('type') ?? '';
+      const [mediaType, ...parameters] = type
+        .toLowerCase()
+        .split(';')
+        .map((value) => value.trim());
+      const parameterMap = new Map(
+        parameters.map((value) => {
+          const separator = value.indexOf('=');
+          return [
+            value.slice(0, separator).trim(),
+            value
+              .slice(separator + 1)
+              .trim()
+              .replace(/^"|"$/g, ''),
+          ];
+        }),
+      );
       if (
         !href ||
-        (!relation.split(/\s+/).includes('subsection') && !type.includes(ATOM_FEED_TYPE))
+        (!relation.split(/\s+/).includes('subsection') &&
+          !(mediaType === 'application/atom+xml' && parameterMap.get('profile') === 'opds-catalog'))
       ) {
         return [];
       }
@@ -163,7 +181,7 @@ export const parseOpdsFeed = (xml: string, feedUrl: string): ParsedOpdsFeed => {
         {
           title,
           url: resolveUrl(href, feedUrl),
-          acquisition: type.includes('kind=acquisition'),
+          acquisition: parameterMap.get('kind') === 'acquisition',
         },
       ];
     });
@@ -223,16 +241,47 @@ const normalizeCatalogUrl = (value: string): string => {
   return url.toString();
 };
 
+const requestWithTimeout = async <T>(
+  url: string,
+  credentials: OpdsCredentials,
+  fetcher: OpdsFetch,
+  consume: (response: Response) => Promise<T>,
+  signal?: AbortSignal,
+  accept?: string,
+  timeoutMs = 30000,
+): Promise<T> => {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) throw new DOMException('Request cancelled', 'AbortError');
+  signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, timeoutMs);
+  try {
+    const response = await fetcher(url, {
+      headers: requestHeaders(credentials, accept),
+      signal: controller.signal,
+    });
+    if (response.status === 401) throw new Error(_('OPDS authentication failed'));
+    if (!response.ok) throw new Error(_('OPDS request failed') + ' (' + response.status + ')');
+    return await consume(response);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
+};
+
 const fetchFeed = async (
   url: string,
   credentials: OpdsCredentials,
   fetcher: OpdsFetch,
-): Promise<ParsedOpdsFeed> => {
-  const response = await fetcher(url, { headers: requestHeaders(credentials) });
-  if (response.status === 401) throw new Error(_('OPDS authentication failed'));
-  if (!response.ok) throw new Error(`${_('OPDS request failed')} (${response.status})`);
-  return parseOpdsFeed(await response.text(), response.url || url);
-};
+  signal?: AbortSignal,
+): Promise<ParsedOpdsFeed> =>
+  requestWithTimeout(
+    url,
+    credentials,
+    fetcher,
+    async (response) => parseOpdsFeed(await response.text(), response.url || url),
+    signal,
+  );
 
 const findAllBooksLink = (navigation: OpdsNavigationLink[]): OpdsNavigationLink | undefined => {
   const allBooksPattern = /^all( books| publications| titles)?$/i;
@@ -251,9 +300,10 @@ export const loadOpdsPublications = async (
   catalogUrl: string,
   credentials: OpdsCredentials = {},
   fetcher: OpdsFetch = defaultOpdsFetch,
+  signal?: AbortSignal,
 ): Promise<OpdsCatalog> => {
   let pageUrl = normalizeCatalogUrl(catalogUrl);
-  let page = await fetchFeed(pageUrl, credentials, fetcher);
+  let page = await fetchFeed(pageUrl, credentials, fetcher, signal);
 
   // Navigate through up to 3 levels of navigation to find books
   let navigationDepth = 0;
@@ -262,7 +312,7 @@ export const loadOpdsPublications = async (
     const allBooks = findAllBooksLink(page.navigation);
     if (allBooks) {
       pageUrl = allBooks.url;
-      page = await fetchFeed(pageUrl, credentials, fetcher);
+      page = await fetchFeed(pageUrl, credentials, fetcher, signal);
       navigationDepth++;
       continue;
     }
@@ -270,7 +320,7 @@ export const loadOpdsPublications = async (
     // If no "all books" link, try the search URL
     if (page.searchUrl) {
       pageUrl = page.searchUrl;
-      page = await fetchFeed(pageUrl, credentials, fetcher);
+      page = await fetchFeed(pageUrl, credentials, fetcher, signal);
       navigationDepth++;
       continue;
     }
@@ -279,7 +329,7 @@ export const loadOpdsPublications = async (
     const acquisitionLinks = page.navigation.filter((link) => link.acquisition);
     if (acquisitionLinks.length > 0) {
       pageUrl = acquisitionLinks[0]!.url;
-      page = await fetchFeed(pageUrl, credentials, fetcher);
+      page = await fetchFeed(pageUrl, credentials, fetcher, signal);
       navigationDepth++;
       continue;
     }
@@ -287,7 +337,7 @@ export const loadOpdsPublications = async (
     // Otherwise try any navigation link
     if (page.navigation.length > 0) {
       pageUrl = page.navigation[0]!.url;
-      page = await fetchFeed(pageUrl, credentials, fetcher);
+      page = await fetchFeed(pageUrl, credentials, fetcher, signal);
       navigationDepth++;
       continue;
     }
@@ -304,17 +354,31 @@ export const loadOpdsPublications = async (
   const publications = new Map<string, OpdsPublication>();
   const visited = new Set<string>();
 
+  let truncated = false;
   while (!visited.has(pageUrl)) {
+    if (signal?.aborted) throw new DOMException('Request cancelled', 'AbortError');
     visited.add(pageUrl);
     for (const publication of page.publications) {
+      if (publications.size >= 10000) {
+        truncated = true;
+        break;
+      }
       publications.set(publication.id || publication.downloadUrl, publication);
     }
-    if (!page.nextUrl) break;
+    if (truncated || !page.nextUrl) break;
+    if (visited.size >= 100) {
+      truncated = true;
+      break;
+    }
     pageUrl = page.nextUrl;
-    page = await fetchFeed(pageUrl, credentials, fetcher);
+    page = await fetchFeed(pageUrl, credentials, fetcher, signal);
   }
 
-  return { title, publications: Array.from(publications.values()) };
+  return {
+    title,
+    publications: Array.from(publications.values()),
+    ...(truncated ? { truncated } : {}),
+  };
 };
 
 const safeFilename = (title: string, format: BookFormat): string => {
@@ -329,19 +393,21 @@ export const downloadOpdsPublication = async (
   publication: OpdsPublication,
   credentials: OpdsCredentials = {},
   fetcher: OpdsFetch = defaultOpdsFetch,
-): Promise<File> => {
-  const response = await fetcher(publication.downloadUrl, {
-    headers: requestHeaders(credentials, '*/*'),
-  });
-  if (response.status === 401) throw new Error(_('OPDS authentication failed'));
-  if (!response.ok) throw new Error(`${_('Book download failed')} (${response.status})`);
-
-  const contentType = response.headers.get('Content-Type')?.split(';', 1)[0] || '';
-  return new File(
-    [await response.arrayBuffer()],
-    safeFilename(publication.title, publication.format),
-    {
-      type: contentType || undefined,
+  signal?: AbortSignal,
+): Promise<File> =>
+  requestWithTimeout(
+    publication.downloadUrl,
+    credentials,
+    fetcher,
+    async (response) => {
+      const contentType = response.headers.get('Content-Type')?.split(';', 1)[0] || '';
+      return new File(
+        [await response.arrayBuffer()],
+        safeFilename(publication.title, publication.format),
+        { type: contentType || undefined },
+      );
     },
+    signal,
+    '*/*',
+    600000,
   );
-};

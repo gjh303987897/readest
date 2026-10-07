@@ -9,7 +9,7 @@ const drag = vi.hoisted(() => ({
   end: (_data: { clientY: number; velocity: number }) => {},
 }));
 
-const device = vi.hoisted(() => ({ isMobile: false, isDesktopApp: false }));
+const device = vi.hoisted(() => ({ isMobile: false, isDesktopApp: false, dir: 'ltr' }));
 
 vi.mock('@/hooks/useDrag', () => ({
   useDrag: (onMove: typeof drag.move, _onKeyDown: () => void, onEnd: typeof drag.end) => {
@@ -30,11 +30,12 @@ vi.mock('@/store/deviceStore', () => ({
 }));
 vi.mock('@/hooks/useTranslation', () => ({ useTranslation: () => (key: string) => key }));
 vi.mock('@/hooks/useResponsiveSize', () => ({ useResponsiveSize: (size: number) => size }));
-vi.mock('@/utils/rtl', () => ({ getDirFromUILanguage: () => 'ltr' }));
+vi.mock('@/utils/rtl', () => ({ getDirFromUILanguage: () => device.dir }));
 
 beforeEach(() => {
   device.isMobile = false;
   device.isDesktopApp = false;
+  device.dir = 'ltr';
   vi.useFakeTimers();
   vi.stubGlobal('innerWidth', 390);
   vi.stubGlobal('innerHeight', 800);
@@ -263,4 +264,78 @@ describe('Dialog drag dismissal', () => {
     expect(modal?.style.height).toBe('70%');
     expect(document.querySelector<HTMLElement>('.overlay')?.style.opacity).toBe('1');
   });
+});
+
+it('updates direction when an open dialog changes language', () => {
+  const { rerender } = render(
+    <Dialog isOpen onClose={() => {}}>
+      Content
+    </Dialog>,
+  );
+  device.dir = 'rtl';
+  rerender(
+    <Dialog isOpen onClose={() => {}}>
+      Content
+    </Dialog>,
+  );
+  expect(document.querySelector('dialog')?.dir).toBe('rtl');
+  device.dir = 'ltr';
+  rerender(
+    <Dialog isOpen onClose={() => {}}>
+      Content
+    </Dialog>,
+  );
+  expect(document.querySelector('dialog')?.dir).toBe('ltr');
+});
+
+it('wraps keyboard focus and cleans up the element listener', () => {
+  const { unmount } = render(
+    <Dialog isOpen onClose={() => {}}>
+      <button>First</button>
+      <button>Last</button>
+    </Dialog>,
+  );
+  const dialog = document.querySelector('dialog')!;
+  const remove = vi.spyOn(dialog, 'removeEventListener');
+  const first = screen.getByRole('button', { name: 'First' });
+  const last = screen.getByRole('button', { name: 'Last' });
+  const close = screen.getAllByRole('button', { name: 'Close' })[0]!;
+  last.focus();
+  fireEvent.keyDown(last, { key: 'Tab' });
+  expect(document.activeElement).toBe(close);
+  close.focus();
+  fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+  expect(document.activeElement).toBe(last);
+  expect(dialog.getAttribute('aria-modal')).toBe('true');
+  first.focus();
+  unmount();
+  expect(remove.mock.calls.some((call) => call[0] === 'keydown')).toBe(true);
+});
+
+it('opens using the native modal API and retains the exit animation on cancel', () => {
+  const show = vi.fn(function (this: HTMLDialogElement) {
+    this.open = true;
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: show,
+  });
+  try {
+    const onClose = vi.fn();
+    render(
+      <Dialog isOpen onClose={onClose}>
+        Content
+      </Dialog>,
+    );
+    expect(show).toHaveBeenCalledOnce();
+    const dialog = document.querySelector('dialog')!;
+    const cancel = new Event('cancel', { cancelable: true });
+    act(() => dialog.dispatchEvent(cancel));
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(250));
+    expect(onClose).toHaveBeenCalledOnce();
+  } finally {
+    delete (HTMLDialogElement.prototype as unknown as Record<string, unknown>)['showModal'];
+  }
 });

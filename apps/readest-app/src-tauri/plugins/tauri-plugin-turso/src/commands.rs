@@ -31,15 +31,43 @@ pub(crate) async fn load<R: Runtime>(
         return Ok(path);
     }
 
-    let conn =
-        crate::wrapper::DbConnection::connect(&path, encryption, base_path, &options.experimental)
-            .await?;
-
+    let initializer = {
+        let mut pending = db_instances.1.lock().await;
+        pending.entry(path.clone()).or_default().clone()
+    };
+    let connected = initializer
+        .get_or_try_init(|| async {
+            crate::wrapper::DbConnection::connect(
+                &path,
+                encryption,
+                base_path,
+                &options.experimental,
+            )
+            .await
+            .map(std::sync::Arc::new)
+        })
+        .await;
+    let conn = match connected {
+        Ok(conn) => conn.clone(),
+        Err(error) => {
+            let mut pending = db_instances.1.lock().await;
+            if std::sync::Arc::strong_count(&initializer) == 2
+                && pending
+                    .get(&path)
+                    .is_some_and(|current| std::sync::Arc::ptr_eq(current, &initializer))
+            {
+                pending.remove(&path);
+            }
+            return Err(error);
+        }
+    };
+    // Only initialization of this path is shared; queries never wait for unrelated opens.
     db_instances
         .0
         .lock()
         .await
-        .insert(path.clone(), std::sync::Arc::new(conn));
+        .entry(path.clone())
+        .or_insert(conn);
 
     Ok(path)
 }
@@ -103,17 +131,24 @@ pub(crate) async fn close(
     db_instances: State<'_, DbInstances>,
     db: Option<String>,
 ) -> Result<bool, Error> {
-    let mut instances = db_instances.0.lock().await;
-
-    if let Some(db) = db {
-        if let Some(conn) = instances.remove(&db) {
-            conn.close().await;
+    {
+        let mut initializers = db_instances.1.lock().await;
+        if let Some(db) = &db {
+            initializers.remove(db);
+        } else {
+            initializers.clear();
         }
-    } else {
-        // Close all connections
-        for (_, conn) in instances.drain() {
-            conn.close().await;
+    }
+    let connections: Vec<_> = {
+        let mut instances = db_instances.0.lock().await;
+        if let Some(db) = db {
+            instances.remove(&db).into_iter().collect()
+        } else {
+            instances.drain().map(|(_, conn)| conn).collect()
         }
+    };
+    for conn in connections {
+        conn.close().await;
     }
 
     Ok(true)

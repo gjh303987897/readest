@@ -6,12 +6,12 @@ export const throttle = <T extends (...args: Parameters<T>) => void | Promise<vo
   func: T,
   delay: number,
   options: ThrottleOptions = { emitLast: true },
-): ((...args: Parameters<T>) => void) => {
-  let lastCall = 0;
+): ((...args: Parameters<T>) => void) & { cancel: () => void } => {
+  let lastCall = -Infinity;
   let timeout: ReturnType<typeof setTimeout> | null = null;
   let lastArgs: Parameters<T> | null = null;
 
-  return (...args: Parameters<T>): void => {
+  const throttled = (...args: Parameters<T>): void => {
     const now = Date.now();
     const remaining = delay - (now - lastCall);
 
@@ -33,6 +33,7 @@ export const throttle = <T extends (...args: Parameters<T>) => void | Promise<vo
         timeout = setTimeout(() => {
           timeout = null;
           if (lastArgs && options.emitLast) {
+            lastCall = Date.now();
             func(...(lastArgs as Parameters<T>));
             lastArgs = null;
           }
@@ -40,4 +41,10 @@ export const throttle = <T extends (...args: Parameters<T>) => void | Promise<vo
       }
     }
   };
+  throttled.cancel = () => {
+    if (timeout) clearTimeout(timeout);
+    timeout = null;
+    lastArgs = null;
+  };
+  return throttled;
 };

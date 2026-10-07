@@ -208,11 +208,18 @@ fn json_to_turso_value(v: JsonValue) -> Value {
 }
 
 /// Database instances holder
-pub struct DbInstances(pub Arc<Mutex<HashMap<String, Arc<DbConnection>>>>);
+type ConnectionInitializers = HashMap<String, Arc<tokio::sync::OnceCell<Arc<DbConnection>>>>;
+pub struct DbInstances(
+    pub Arc<Mutex<HashMap<String, Arc<DbConnection>>>>,
+    pub Mutex<ConnectionInitializers>,
+);
 
 impl Default for DbInstances {
     fn default() -> Self {
-        Self(Arc::new(Mutex::new(HashMap::new())))
+        Self(
+            Arc::new(Mutex::new(HashMap::new())),
+            Mutex::new(HashMap::new()),
+        )
     }
 }
 

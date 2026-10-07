@@ -24,6 +24,7 @@ use tauri_plugin_fs::FsExt;
 use tauri::{Listener, Url};
 mod dir_scanner;
 mod epub_parser;
+mod filesystem_scope;
 #[cfg(target_os = "macos")]
 mod macos;
 mod melotts;

@@ -72,7 +72,19 @@ fn sanitize_file(path: &Path) {
     if sanitized.trim() == "{}" {
         let _ = std::fs::remove_file(path);
     } else {
-        let _ = std::fs::write(path, sanitized);
+        use std::io::Write;
+        let temporary = path.with_extension("json.tmp");
+        let result = (|| -> std::io::Result<()> {
+            let mut file = std::fs::File::create(&temporary)?;
+            file.write_all(sanitized.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            std::fs::rename(&temporary, path)
+        })();
+        if let Err(error) = result {
+            log::warn!("Failed to replace window state: {error}");
+            let _ = std::fs::remove_file(temporary);
+        }
     }
 }
 
