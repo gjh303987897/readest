@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
+  CirclePlus,
   Cloud,
   CloudDownload,
   CloudUpload,
@@ -461,29 +462,37 @@ const LibraryPage = () => {
             </button>
           )}
           <Dropdown
-            label={_('Import Books')}
+            label={_('Add')}
             className='dropdown-end'
             buttonClassName='btn btn-ghost btn-square h-9 min-h-9 w-9'
             toggleButton={
               importing ? (
                 <LoaderCircle className='h-4 w-4 animate-spin' />
               ) : (
-                <Upload className='h-4 w-4' />
+                <CirclePlus aria-hidden='true' className='h-4 w-4' />
               )
             }
-            disabled={importing || !appService}
           >
             <ul className='menu dropdown-content bg-base-100 eink-bordered z-50 w-56 rounded-lg border p-2 shadow'>
               <MenuItem
                 transient
+                label={user ? _('Log Out') : _('Log In')}
+                Icon={user ? <LogOut className='h-4 w-4' /> : <LogIn className='h-4 w-4' />}
+                onClick={() => (user ? void logout() : navigateToLogin(router))}
+              />
+              <li aria-hidden='true' className='border-base-300 my-1 border-t' />
+              <MenuItem
+                transient
                 label={_('From Local File')}
                 Icon={<Upload className='h-4 w-4' />}
+                disabled={importing || !appService}
                 onClick={() => void handleImport()}
               />
               <MenuItem
                 transient
                 label={_('From OPDS Catalog')}
                 Icon={<LibraryBig className='h-4 w-4' />}
+                disabled={importing || !appService}
                 onClick={() => setOpdsDialogOpen(true)}
               />
             </ul>
@@ -499,15 +508,6 @@ const LibraryPage = () => {
             }}
           >
             <Settings className='h-4 w-4' />
-          </button>
-          <button
-            type='button'
-            className='btn btn-ghost btn-square h-9 min-h-9 w-9'
-            title={user ? _('Log Out') : _('Log In')}
-            aria-label={user ? _('Log Out') : _('Log In')}
-            onClick={() => (user ? void logout() : navigateToLogin(router))}
-          >
-            {user ? <LogOut className='h-4 w-4' /> : <LogIn className='h-4 w-4' />}
           </button>
         </div>
         {showWindowControls && (
