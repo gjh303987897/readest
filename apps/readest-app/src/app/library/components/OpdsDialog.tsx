@@ -3,12 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookText,
+  ChevronDown,
   ChevronLeft,
   Download,
+  LibraryBig,
   LoaderCircle,
+  Pencil,
+  Save,
   Search,
   Server,
   Trash2,
+  X,
 } from 'lucide-react';
 
 import Dialog from '@/components/Dialog';
@@ -18,6 +23,7 @@ import {
   loadOpdsPublications,
   type OpdsCatalog,
   type OpdsCredentials,
+  type OpdsProvider,
 } from '@/services/opdsService';
 import { eventDispatcher } from '@/utils/event';
 
@@ -28,6 +34,7 @@ interface OpdsDialogProps {
 }
 
 interface SavedOpdsLogin {
+  provider?: OpdsProvider;
   url: string;
   username: string;
   password: string;
@@ -46,7 +53,10 @@ const readSavedLogins = (): SavedOpdsLogin[] => {
         typeof entry.url !== 'string' ||
         typeof entry.username !== 'string' ||
         typeof entry.password !== 'string' ||
-        typeof entry.title !== 'string'
+        typeof entry.title !== 'string' ||
+        (entry.provider !== undefined &&
+          entry.provider !== 'calibre-web' &&
+          entry.provider !== 'kavita')
       ) {
         return false;
       }
@@ -63,11 +73,14 @@ const readSavedLogins = (): SavedOpdsLogin[] => {
 
 const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles }) => {
   const _ = useTranslation();
+  const [provider, setProvider] = useState<OpdsProvider | ''>('');
   const [catalogUrl, setCatalogUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [saveLogin, setSaveLogin] = useState(false);
   const [savedLogins, setSavedLogins] = useState<SavedOpdsLogin[]>(readSavedLogins);
+  const [editingLogin, setEditingLogin] = useState<SavedOpdsLogin | null>(null);
+  const providerInput = useRef<HTMLSelectElement | null>(null);
   const [catalog, setCatalog] = useState<OpdsCatalog | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -104,22 +117,36 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     try {
       localStorage.setItem(SAVED_LOGINS_KEY, JSON.stringify(next));
       setSavedLogins(next);
+      return true;
     } catch {
       setError(_('Could not update saved logins on this device'));
+      return false;
     }
   };
 
-  const connect = async (url: string, login: OpdsCredentials, remember: boolean) => {
+  const connect = async (
+    url: string,
+    login: OpdsCredentials,
+    remember: boolean,
+    selectedProvider: OpdsProvider,
+  ) => {
     if (!url.trim() || loading) return;
     setCatalogUrl(url);
     setUsername(login.username ?? '');
     setPassword(login.password ?? '');
+    setProvider(selectedProvider);
     setLoading(true);
     setError('');
     const controller = new AbortController();
     loadingController.current = controller;
     try {
-      const loadedCatalog = await loadOpdsPublications(url, login, undefined, controller.signal);
+      const loadedCatalog = await loadOpdsPublications(
+        url,
+        login,
+        undefined,
+        controller.signal,
+        selectedProvider,
+      );
       if (controller.signal.aborted) return;
       setCatalog(loadedCatalog);
       if (loadedCatalog.truncated)
@@ -128,6 +155,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
       setQuery('');
       if (remember) {
         const saved = {
+          provider: selectedProvider,
           url: new URL(url.trim()).toString(),
           username: login.username ?? '',
           password: login.password ?? '',
@@ -136,7 +164,10 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
         persistSavedLogins([
           saved,
           ...savedLogins.filter(
-            (entry) => entry.url !== saved.url || entry.username !== saved.username,
+            (entry) =>
+              entry.url !== saved.url ||
+              entry.username !== saved.username ||
+              (entry.provider !== undefined && entry.provider !== saved.provider),
           ),
         ]);
         setSaveLogin(false);
@@ -151,15 +182,96 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     }
   };
 
-  const handleConnect = (event: React.FormEvent) => {
+  const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    void connect(catalogUrl, credentials, saveLogin);
+    if (!provider) return;
+    if (editingLogin) {
+      let url: URL;
+      try {
+        url = new URL(catalogUrl.trim());
+        if (!['http:', 'https:'].includes(url.protocol)) throw new Error();
+      } catch {
+        setError(_('OPDS catalog URL must use HTTP or HTTPS'));
+        return;
+      }
+      const updated: SavedOpdsLogin = {
+        ...editingLogin,
+        provider,
+        url: url.toString(),
+        username: username.trim(),
+        password,
+      };
+      if (
+        savedLogins.some(
+          (entry) =>
+            entry !== editingLogin &&
+            new URL(entry.url).toString() === updated.url &&
+            entry.username === updated.username &&
+            (entry.provider === undefined || entry.provider === updated.provider),
+        )
+      ) {
+        setError(_('A login for this provider, URL and username already exists.'));
+        return;
+      }
+      if (
+        persistSavedLogins(savedLogins.map((entry) => (entry === editingLogin ? updated : entry)))
+      ) {
+        setEditingLogin(null);
+        setError('');
+      }
+      return;
+    }
+    void connect(catalogUrl, credentials, saveLogin, provider);
+  };
+
+  const editSavedLogin = (login: SavedOpdsLogin) => {
+    setEditingLogin(login);
+    setProvider(login.provider ?? '');
+    setCatalogUrl(login.url);
+    setUsername(login.username);
+    setPassword(login.password);
+    setSaveLogin(false);
+    setError('');
+    providerInput.current?.focus();
+  };
+
+  const cancelEdit = () => {
+    setEditingLogin(null);
+    setProvider('');
+    setCatalogUrl('');
+    setUsername('');
+    setPassword('');
+    setError('');
   };
 
   const removeSavedLogin = (login: SavedOpdsLogin) => {
     persistSavedLogins(
-      savedLogins.filter((entry) => entry.url !== login.url || entry.username !== login.username),
+      savedLogins.filter(
+        (entry) =>
+          entry.url !== login.url ||
+          entry.username !== login.username ||
+          entry.provider !== login.provider,
+      ),
     );
+  };
+
+  const selectSavedLogin = (login: SavedOpdsLogin) => {
+    if (login.provider) {
+      void connect(
+        login.url,
+        { username: login.username, password: login.password },
+        false,
+        login.provider,
+      );
+      return;
+    }
+    // Older saved logins retain their credentials until the provider is chosen.
+    setCatalogUrl(login.url);
+    setUsername(login.username);
+    setPassword(login.password);
+    setProvider('');
+    setSaveLogin(true);
+    setError(_('Choose a provider for this saved login, then connect.'));
   };
 
   const togglePublication = (id: string) => {
@@ -240,17 +352,81 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     <Dialog
       id='opds-catalog-dialog'
       isOpen={isOpen}
-      title={_('OPDS Catalog')}
+      title={editingLogin ? _('Edit OPDS Catalog') : _('OPDS Catalog')}
+      header={
+        editingLogin
+          ? (requestClose) => (
+              <div className='grid h-11 w-full grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-2'>
+                <button
+                  type='button'
+                  onClick={cancelEdit}
+                  className='btn btn-ghost btn-circle h-8 min-h-8 w-8 focus-visible:ring-2 focus-visible:ring-base-content/15'
+                  title={_('Back')}
+                  aria-label={_('Back')}
+                >
+                  <ChevronLeft aria-hidden='true' className='h-4 w-4 rtl:rotate-180' />
+                </button>
+                <span className='truncate text-center font-bold'>{_('Edit OPDS Catalog')}</span>
+                <button
+                  type='button'
+                  onClick={requestClose}
+                  className='bg-base-300/65 btn btn-ghost btn-circle h-6 min-h-6 w-6 justify-self-end focus-visible:ring-2 focus-visible:ring-base-content/15'
+                  title={_('Close')}
+                  aria-label={_('Close')}
+                >
+                  <X aria-hidden='true' className='h-4 w-4' />
+                </button>
+              </div>
+            )
+          : undefined
+      }
       dismissible={!downloading}
       onClose={handleClose}
       boxClassName='sm:h-[78%] sm:w-[min(820px,90vw)] sm:max-w-[820px]'
-      contentClassName='!flex !min-h-0 !flex-col !overflow-hidden !px-4 sm:!px-6'
+      useOverlayScroll={!catalog}
+      contentClassName={
+        catalog ? '!flex !min-h-0 !flex-col !overflow-hidden !px-4 sm:!px-6' : '!px-4 sm:!px-6'
+      }
     >
       {!catalog ? (
         <form
-          className='view-switch-enter mx-auto flex min-h-0 w-full max-w-lg flex-col gap-4 overflow-y-auto py-4'
-          onSubmit={handleConnect}
+          className='view-switch-enter mx-auto flex w-full max-w-lg flex-col gap-4 px-1 py-4'
+          onSubmit={handleSubmit}
         >
+          <label className='flex flex-col gap-1.5'>
+            <span className='text-sm font-medium'>{_('OPDS provider')}</span>
+            <div
+              className={`eink-bordered border-base-300 bg-base-100 relative flex h-11 items-center rounded-lg border transition-colors duration-150 focus-within:ring-2 focus-within:ring-base-content/15 ${loading ? 'opacity-50' : 'hover:border-base-content/30'}`}
+            >
+              <LibraryBig
+                aria-hidden='true'
+                className='pointer-events-none absolute start-3 h-4 w-4 opacity-60'
+              />
+              <select
+                ref={providerInput}
+                required
+                value={provider}
+                disabled={loading}
+                onChange={(event) => setProvider(event.target.value as OpdsProvider | '')}
+                className={`h-full w-full min-w-0 cursor-pointer appearance-none rounded-lg bg-transparent pe-10 ps-9 text-sm outline-none disabled:cursor-not-allowed ${provider ? 'text-base-content font-medium' : 'text-base-content/60'}`}
+                aria-label={_('OPDS provider')}
+              >
+                <option value='' disabled className='bg-base-100 text-base-content/60'>
+                  {_('Select an OPDS provider')}
+                </option>
+                <option value='calibre-web' className='bg-base-100 text-base-content'>
+                  Calibre-Web
+                </option>
+                <option value='kavita' className='bg-base-100 text-base-content'>
+                  Kavita
+                </option>
+              </select>
+              <ChevronDown
+                aria-hidden='true'
+                className='pointer-events-none absolute end-3 h-4 w-4 opacity-60'
+              />
+            </div>
+          </label>
           <label className='flex flex-col gap-1.5'>
             <span className='text-sm font-medium'>{_('Catalog URL')}</span>
             <div className='eink-bordered border-base-300 bg-base-100 flex h-11 items-center gap-2 rounded-lg border px-3 focus-within:ring-2 focus-within:ring-base-content/15'>
@@ -258,15 +434,27 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
               <input
                 type='url'
                 required
+                disabled={loading}
                 value={catalogUrl}
                 onChange={(event) => setCatalogUrl(event.target.value)}
                 className='min-w-0 flex-1 bg-transparent text-sm outline-none'
                 aria-label={_('Catalog URL')}
-                placeholder='https://example.com/opds'
+                placeholder={
+                  provider === 'kavita'
+                    ? 'https://example.com/api/opds/your-key'
+                    : 'https://example.com/opds'
+                }
                 autoCapitalize='none'
                 autoCorrect='off'
               />
             </div>
+            {provider && (
+              <span className='text-base-content/60 text-xs'>
+                {provider === 'kavita'
+                  ? _('Paste the full OPDS URL from Kavita user settings, including your key.')
+                  : _('Enter your Calibre-Web server address or OPDS URL.')}
+              </span>
+            )}
           </label>
 
           <div className='grid gap-4 sm:grid-cols-2'>
@@ -274,6 +462,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
               <span className='text-sm font-medium'>{_('Username')}</span>
               <input
                 value={username}
+                disabled={loading}
                 onChange={(event) => setUsername(event.target.value)}
                 className='input input-bordered eink-bordered h-11 w-full rounded-lg text-sm'
                 aria-label={_('Username')}
@@ -286,6 +475,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
               <input
                 type='password'
                 value={password}
+                disabled={loading}
                 onChange={(event) => setPassword(event.target.value)}
                 className='input input-bordered eink-bordered h-11 w-full rounded-lg text-sm'
                 aria-label={_('Password')}
@@ -295,58 +485,66 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
           </div>
 
           <div>
-            <label className='flex cursor-pointer items-center gap-2 text-sm'>
-              <input
-                type='checkbox'
-                className='checkbox checkbox-sm'
-                checked={saveLogin}
-                onChange={(event) => setSaveLogin(event.target.checked)}
-              />
-              <span>{_('Save login')}</span>
-            </label>
+            {!editingLogin && (
+              <label className='flex cursor-pointer items-center gap-2 text-sm'>
+                <input
+                  type='checkbox'
+                  className='checkbox checkbox-sm'
+                  checked={saveLogin}
+                  disabled={loading}
+                  onChange={(event) => setSaveLogin(event.target.checked)}
+                />
+                <span>{_('Save login')}</span>
+              </label>
+            )}
             <p className='text-base-content/60 mt-1 text-xs'>
               {_('Saved passwords are stored unencrypted on this device.')}
             </p>
           </div>
 
           {error && <p className='text-error text-sm'>{error}</p>}
-          <button
-            type='submit'
-            className='btn btn-contrast mt-1 self-end'
-            disabled={loading || !catalogUrl.trim()}
-          >
-            {loading ? (
-              <LoaderCircle aria-hidden='true' className='h-4 w-4 animate-spin' />
-            ) : (
-              <Server aria-hidden='true' className='h-4 w-4' />
-            )}
-            {_('Connect')}
-          </button>
+          <div className='mt-1 flex items-center justify-end gap-2'>
+            <button
+              type='submit'
+              className='btn btn-contrast'
+              disabled={loading || !provider || !catalogUrl.trim()}
+            >
+              {loading ? (
+                <LoaderCircle aria-hidden='true' className='h-4 w-4 animate-spin' />
+              ) : editingLogin ? (
+                <Save aria-hidden='true' className='h-4 w-4' />
+              ) : (
+                <Server aria-hidden='true' className='h-4 w-4' />
+              )}
+              {editingLogin ? _('Save Changes') : _('Connect')}
+            </button>
+          </div>
 
-          {savedLogins.length > 0 && (
+          {!editingLogin && savedLogins.length > 0 && (
             <section className='border-base-200 mt-2 border-t pt-4'>
               <h2 className='mb-2 text-sm font-semibold'>{_('Saved logins')}</h2>
               <div className='flex flex-col gap-2'>
                 {savedLogins.map((login) => (
                   <div
-                    key={`${login.url}\u0000${login.username}`}
+                    key={`${login.provider ?? ''}\u0000${login.url}\u0000${login.username}`}
                     className='eink-bordered border-base-300 flex min-w-0 items-center rounded-lg border'
                   >
                     <button
                       type='button'
-                      className='hover:bg-base-200/60 flex min-w-0 flex-1 items-center gap-3 rounded-l-lg px-3 py-2 text-start transition-colors'
-                      onClick={() =>
-                        void connect(
-                          login.url,
-                          { username: login.username, password: login.password },
-                          false,
-                        )
-                      }
-                      disabled={loading}
+                      className='hover:bg-base-200/60 flex min-w-0 flex-1 items-center gap-3 rounded-s-lg px-3 py-2 text-start transition-colors'
+                      onClick={() => selectSavedLogin(login)}
+                      disabled={loading || !!editingLogin}
                     >
                       <Server aria-hidden='true' className='h-4 w-4 shrink-0 opacity-60' />
                       <span className='min-w-0 flex-1'>
                         <span className='block truncate text-sm font-medium'>{login.title}</span>
+                        <span className='text-base-content/60 block text-xs'>
+                          {login.provider === 'calibre-web'
+                            ? 'Calibre-Web'
+                            : login.provider === 'kavita'
+                              ? 'Kavita'
+                              : _('Select an OPDS provider')}
+                        </span>
                         <span className='text-base-content/60 block truncate text-xs'>
                           {login.username ? `${login.username} @ ${login.url}` : login.url}
                         </span>
@@ -355,8 +553,18 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
                     <button
                       type='button'
                       className='btn btn-ghost btn-square h-9 min-h-9 w-9 shrink-0'
+                      onClick={() => editSavedLogin(login)}
+                      disabled={loading || !!editingLogin}
+                      title={_('Edit saved login for {{title}}', { title: login.title })}
+                      aria-label={_('Edit saved login for {{title}}', { title: login.title })}
+                    >
+                      <Pencil aria-hidden='true' className='h-4 w-4' />
+                    </button>
+                    <button
+                      type='button'
+                      className='btn btn-ghost btn-square h-9 min-h-9 w-9 shrink-0'
                       onClick={() => removeSavedLogin(login)}
-                      disabled={loading}
+                      disabled={loading || !!editingLogin}
                       title={_('Remove saved login for {{title}}', { title: login.title })}
                       aria-label={_('Remove saved login for {{title}}', { title: login.title })}
                     >

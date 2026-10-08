@@ -495,6 +495,11 @@ const LibraryPage = () => {
                 disabled={importing || !appService}
                 onClick={() => setOpdsDialogOpen(true)}
               />
+              <MenuItem
+                transient
+                label={_('OPDS View Mode')}
+                Icon={<LibraryBig className='h-4 w-4' />}
+              />
             </ul>
           </Dropdown>
           <button

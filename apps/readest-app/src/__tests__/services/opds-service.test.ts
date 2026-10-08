@@ -7,6 +7,140 @@ import {
   type OpdsPublication,
 } from '@/services/opdsService';
 
+const navigationFeed = (links: string[], next?: string) =>
+  `<feed xmlns="http://www.w3.org/2005/Atom"><title>Library</title>
+    ${next ? `<link rel="next" href="${next}"/>` : ''}
+    ${links.map((href) => `<entry><title>目录</title><link rel="subsection" href="${href}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/></entry>`).join('')}
+  </feed>`;
+
+const bookFeed = (id: string, next?: string) =>
+  `<feed xmlns="http://www.w3.org/2005/Atom"><title>Books</title>
+    ${next ? `<link rel="next" href="${next}"/>` : ''}
+    <entry><id>${id}</id><title>Book ${id}</title><link rel="http://opds-spec.org/acquisition" href="/download/${id}.epub" type="application/epub+zip"/></entry>
+  </feed>`;
+
+describe('Provider-specific OPDS catalogs', () => {
+  it.each([
+    'https://books.example.com/calibre',
+    'https://books.example.com/calibre/opds/',
+    'https://books.example.com/calibre/opds/new?offset=40',
+  ])('loads all Calibre-Web books from %s and follows pagination', async (url) => {
+    const fetcher = vi.fn(
+      async (input: string | URL | Request) =>
+        new Response(
+          String(input).includes('?offset=20')
+            ? bookFeed('second')
+            : bookFeed('first', '?offset=20'),
+        ),
+    );
+    const catalog = await loadOpdsPublications(url, {}, fetcher, undefined, 'calibre-web');
+    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://books.example.com/calibre/opds/books/letter/00',
+      'https://books.example.com/calibre/opds/books/letter/00?offset=20',
+    ]);
+    expect(catalog.publications.map((book) => book.id)).toEqual(['first', 'second']);
+  });
+
+  it('loads provider catalogs beyond the generic 100-page navigation budget', async () => {
+    let pages = 0;
+    const fetcher = vi.fn(async () => {
+      pages++;
+      return new Response(bookFeed(String(pages), pages < 103 ? `?offset=${pages}` : undefined));
+    });
+    const catalog = await loadOpdsPublications(
+      'https://books.example.com/opds',
+      {},
+      fetcher,
+      undefined,
+      'calibre-web',
+    );
+    expect(fetcher).toHaveBeenCalledTimes(103);
+    expect(catalog.publications).toHaveLength(103);
+    expect(catalog.truncated).toBeUndefined();
+  });
+
+  it('visits every Kavita library and paginated series, including mixed feeds and deeper chapters', async () => {
+    const base = 'https://books.example.com/kavita/api/opds/user-key';
+    const feeds: Record<string, string> = {
+      '/libraries': navigationFeed([`${base}/libraries/1`, `${base}/libraries/2`]),
+      '/libraries/1': navigationFeed([`${base}/series/10`], '?pageNumber=2'),
+      '/libraries/1?pageNumber=2': navigationFeed([`${base}/series/11`]),
+      '/libraries/2': navigationFeed([`${base}/series/20`]),
+      '/series/10': bookFeed('first').replace(
+        '</feed>',
+        navigationFeed([`${base}/series/10/volume/1`]).match(/<entry>.*<\/entry>/s)![0] + '</feed>',
+      ),
+      '/series/10/volume/1': navigationFeed([`${base}/series/10/volume/1/chapter/100`]),
+      '/series/10/volume/1/chapter/100': bookFeed('deeper'),
+      '/series/11': bookFeed('second', '?pageNumber=2'),
+      '/series/11?pageNumber=2': bookFeed('third'),
+      '/series/20': bookFeed('first').replace(
+        '</feed>',
+        `<entry><id>last</id><title>Last</title><link rel="http://opds-spec.org/acquisition" href="/download/last.epub"/></entry></feed>`,
+      ),
+    };
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const path = String(input).slice(base.length);
+      expect(feeds[path]).toBeDefined();
+      return new Response(feeds[path]);
+    });
+    const catalog = await loadOpdsPublications(
+      `${base}/recently-added`,
+      {},
+      fetcher,
+      undefined,
+      'kavita',
+    );
+    expect(new Set(catalog.publications.map((book) => book.id))).toEqual(
+      new Set(['first', 'second', 'third', 'deeper', 'last']),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(Object.keys(feeds).length);
+    expect(fetcher.mock.calls[0]?.[0]).toBe(`${base}/libraries`);
+  });
+
+  it('does not require books in the first library and stops repeated navigation URLs', async () => {
+    const base = 'https://books.example.com/api/Opds/user-key';
+    const advertisedBase = base.replace('/api/Opds/', '/api/opds/');
+    const feeds: Record<string, string> = {
+      '/libraries': navigationFeed([
+        `${advertisedBase}/libraries/1`,
+        `${advertisedBase}/libraries/2`,
+      ]),
+      '/libraries/1': navigationFeed([]),
+      '/libraries/2': navigationFeed([`${advertisedBase}/series/1`, `${advertisedBase}/series/1`]),
+      '/series/1': bookFeed('book', `${advertisedBase}/series/1`),
+    };
+    const fetcher = vi.fn(
+      async (input: string | URL | Request) =>
+        new Response(feeds[String(input).slice(base.length)]),
+    );
+    const catalog = await loadOpdsPublications(base, {}, fetcher, undefined, 'kavita');
+    expect(catalog.publications).toHaveLength(1);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it('requires the complete Kavita OPDS URL containing the user key', async () => {
+    const fetcher = vi.fn();
+    await expect(
+      loadOpdsPublications('https://books.example.com', {}, fetcher, undefined, 'kavita'),
+    ).rejects.toThrow('Enter the full Kavita OPDS URL from your user settings');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('cancels Kavita traversal before starting another request', async () => {
+    const controller = new AbortController();
+    const base = 'https://books.example.com/api/opds/key';
+    const fetcher = vi.fn(async () => {
+      controller.abort();
+      return new Response(navigationFeed([`${base}/libraries/1`]));
+    });
+    await expect(
+      loadOpdsPublications(base, {}, fetcher, controller.signal, 'kavita'),
+    ).rejects.toThrow('Request cancelled');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
 const acquisitionFeed = `<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/terms/">
   <title>All Books</title>

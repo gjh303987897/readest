@@ -6,6 +6,8 @@ import { stubTranslation as _ } from '@/utils/misc';
 const ATOM_FEED_TYPE = 'application/atom+xml;profile=opds-catalog';
 const ACQUISITION_REL = 'http://opds-spec.org/acquisition';
 
+export type OpdsProvider = 'calibre-web' | 'kavita';
+
 export interface OpdsCredentials {
   username?: string;
   password?: string;
@@ -296,13 +298,89 @@ const findAllBooksLink = (navigation: OpdsNavigationLink[]): OpdsNavigationLink 
   );
 };
 
+const providerCatalogUrl = (catalogUrl: string, provider: OpdsProvider): string => {
+  const url = new URL(normalizeCatalogUrl(catalogUrl));
+  if (provider === 'calibre-web') {
+    const opdsIndex = url.pathname.search(/\/opds(?:\/|$)/i);
+    const basePath =
+      opdsIndex >= 0 ? url.pathname.slice(0, opdsIndex) : url.pathname.replace(/\/+$/, '');
+    url.pathname = `${basePath}/opds/books/letter/00`;
+  } else {
+    const root = url.pathname.match(/^(.*\/api\/opds\/[^/]+)(?:\/.*)?$/i)?.[1];
+    if (!root) throw new Error(_('Enter the full Kavita OPDS URL from your user settings'));
+    url.pathname = `${root}/libraries`;
+  }
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+};
+
+const loadKavitaPublications = async (
+  catalogUrl: string,
+  credentials: OpdsCredentials,
+  fetcher: OpdsFetch,
+  signal?: AbortSignal,
+): Promise<OpdsCatalog> => {
+  const basePath = new URL(catalogUrl).pathname.slice(0, -'/libraries'.length);
+  const pending = new Set([catalogUrl]);
+  const visited = new Set<string>();
+  const publications = new Map<string, OpdsPublication>();
+  let title = '';
+  let truncated = false;
+  const enqueue = (value: string) => {
+    const url = new URL(value);
+    url.hash = '';
+    if (
+      url.pathname.toLowerCase().startsWith(`${basePath.toLowerCase()}/`) &&
+      /^(?:libraries(?:\/\d+)?|series\/\d+(?:\/volume\/\d+(?:\/chapter\/\d+)?)?)\/?$/i.test(
+        url.pathname.slice(basePath.length + 1),
+      ) &&
+      !visited.has(url.toString())
+    ) {
+      pending.add(url.toString());
+    }
+  };
+
+  // Kavita's libraries and series are navigation feeds, not a flat book list.
+  // Traverse every branch and its pagination, including mixed acquisition feeds.
+  while (pending.size > 0) {
+    if (signal?.aborted) throw new DOMException('Request cancelled', 'AbortError');
+    if (visited.size >= 10000) {
+      truncated = true;
+      break;
+    }
+    const pageUrl = pending.values().next().value!;
+    pending.delete(pageUrl);
+    visited.add(pageUrl);
+    const page = await fetchFeed(pageUrl, credentials, fetcher, signal);
+    title ||= page.title;
+    for (const publication of page.publications) {
+      if (!publications.has(publication.downloadUrl) && publications.size >= 10000) {
+        truncated = true;
+        break;
+      }
+      publications.set(publication.downloadUrl, publication);
+    }
+    if (truncated) break;
+    if (page.nextUrl) enqueue(page.nextUrl);
+    for (const link of page.navigation) enqueue(link.url);
+  }
+
+  if (!publications.size) throw new Error(_('No books were found in this OPDS catalog'));
+  return { title, publications: [...publications.values()], ...(truncated ? { truncated } : {}) };
+};
+
 export const loadOpdsPublications = async (
   catalogUrl: string,
   credentials: OpdsCredentials = {},
   fetcher: OpdsFetch = defaultOpdsFetch,
   signal?: AbortSignal,
+  provider?: OpdsProvider,
 ): Promise<OpdsCatalog> => {
-  let pageUrl = normalizeCatalogUrl(catalogUrl);
+  let pageUrl = provider
+    ? providerCatalogUrl(catalogUrl, provider)
+    : normalizeCatalogUrl(catalogUrl);
+  if (provider === 'kavita') return loadKavitaPublications(pageUrl, credentials, fetcher, signal);
   let page = await fetchFeed(pageUrl, credentials, fetcher, signal);
 
   // Navigate through up to 3 levels of navigation to find books
@@ -366,7 +444,7 @@ export const loadOpdsPublications = async (
       publications.set(publication.id || publication.downloadUrl, publication);
     }
     if (truncated || !page.nextUrl) break;
-    if (visited.size >= 100) {
+    if (visited.size >= (provider ? 10000 : 100)) {
       truncated = true;
       break;
     }
