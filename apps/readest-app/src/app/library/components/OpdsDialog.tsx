@@ -23,52 +23,24 @@ import {
   type OpdsCatalog,
   type OpdsCredentials,
   type OpdsProvider,
+  type OpdsPublication,
 } from '@/services/opdsService';
 import { eventDispatcher } from '@/utils/event';
+import {
+  readSavedLogins,
+  SAVED_LOGINS_KEY,
+  type SavedOpdsLogin,
+} from '@/services/opdsLoginService';
+import { updateOpdsProgressLogin } from '@/services/opdsProgressService';
 
 interface OpdsDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onImportFiles: (files: File[]) => Promise<number>;
+  onImportFiles: (
+    files: File[],
+    context?: { login: SavedOpdsLogin; publications: OpdsPublication[] },
+  ) => Promise<number>;
 }
-
-interface SavedOpdsLogin {
-  provider?: OpdsProvider;
-  url: string;
-  username: string;
-  password: string;
-  title: string;
-}
-
-const SAVED_LOGINS_KEY = 'readest-opds-logins-v1';
-
-const readSavedLogins = (): SavedOpdsLogin[] => {
-  try {
-    const stored = JSON.parse(localStorage.getItem(SAVED_LOGINS_KEY) ?? '[]');
-    if (!Array.isArray(stored)) return [];
-    return stored.filter((entry): entry is SavedOpdsLogin => {
-      if (
-        !entry ||
-        typeof entry.url !== 'string' ||
-        typeof entry.username !== 'string' ||
-        typeof entry.password !== 'string' ||
-        typeof entry.title !== 'string' ||
-        (entry.provider !== undefined &&
-          entry.provider !== 'calibre-web' &&
-          entry.provider !== 'kavita')
-      ) {
-        return false;
-      }
-      try {
-        return ['http:', 'https:'].includes(new URL(entry.url).protocol);
-      } catch {
-        return false;
-      }
-    });
-  } catch {
-    return [];
-  }
-};
 
 const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles }) => {
   const _ = useTranslation();
@@ -76,6 +48,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
   const [catalogUrl, setCatalogUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [koboToken, setKoboToken] = useState('');
   const [saveLogin, setSaveLogin] = useState(false);
   const [savedLogins, setSavedLogins] = useState<SavedOpdsLogin[]>(readSavedLogins);
   const [editingLogin, setEditingLogin] = useState<SavedOpdsLogin | null>(null);
@@ -159,6 +132,9 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
           username: login.username ?? '',
           password: login.password ?? '',
           title: loadedCatalog.title,
+          ...(selectedProvider === 'calibre-web' && koboToken.trim()
+            ? { koboToken: koboToken.trim() }
+            : {}),
         };
         persistSavedLogins([
           saved,
@@ -199,6 +175,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
         url: url.toString(),
         username: username.trim(),
         password,
+        koboToken: provider === 'calibre-web' && koboToken.trim() ? koboToken.trim() : undefined,
       };
       if (
         savedLogins.some(
@@ -215,6 +192,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
       if (
         persistSavedLogins(savedLogins.map((entry) => (entry === editingLogin ? updated : entry)))
       ) {
+        updateOpdsProgressLogin(editingLogin, updated);
         setEditingLogin(null);
         setError('');
       }
@@ -229,6 +207,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     setCatalogUrl(login.url);
     setUsername(login.username);
     setPassword(login.password);
+    setKoboToken(login.koboToken ?? '');
     setSaveLogin(false);
     setError('');
     providerInput.current?.focus();
@@ -240,6 +219,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     setCatalogUrl('');
     setUsername('');
     setPassword('');
+    setKoboToken('');
     setError('');
   };
 
@@ -255,6 +235,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
   };
 
   const selectSavedLogin = (login: SavedOpdsLogin) => {
+    setKoboToken(login.koboToken ?? '');
     if (login.provider) {
       void connect(
         login.url,
@@ -297,6 +278,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
     setError('');
     setDownloadProgress({ current: 0, total: selectedPublications.length });
     const downloadedFiles: File[] = [];
+    const downloadedPublications: OpdsPublication[] = [];
     const failed = new Set<string>();
     try {
       for (let index = 0; index < selectedPublications.length; index += 1) {
@@ -304,11 +286,24 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
         setDownloadProgress({ current: index + 1, total: selectedPublications.length });
         try {
           downloadedFiles.push(await downloadOpdsPublication(publication, credentials));
+          downloadedPublications.push(publication);
         } catch {
           failed.add(publication.id);
         }
       }
-      const imported = downloadedFiles.length ? await onImportFiles(downloadedFiles) : 0;
+      const imported = downloadedFiles.length
+        ? await onImportFiles(downloadedFiles, {
+            login: {
+              provider: provider || undefined,
+              url: catalogUrl,
+              username,
+              password,
+              title: catalog?.title ?? '',
+              koboToken,
+            },
+            publications: downloadedPublications,
+          })
+        : 0;
       if (imported > 0) {
         eventDispatcher.dispatch('toast', {
           type: 'info',
@@ -320,7 +315,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
         messages.push(_('{{count}} book(s) could not be downloaded', { count: failed.size }));
       if (imported < downloadedFiles.length) {
         messages.push(
-          _('{{count}} book(s) could not be imported', {
+          _('{{count}} book(s) were not saved', {
             count: downloadedFiles.length - imported,
           }),
         );
@@ -457,6 +452,27 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
               />
             </label>
           </div>
+
+          {provider === 'calibre-web' && (
+            <label className='flex min-w-0 flex-col gap-1.5'>
+              <span className='text-sm font-medium'>{_('Kobo sync token (optional)')}</span>
+              <input
+                type='password'
+                value={koboToken}
+                disabled={loading}
+                onChange={(event) => setKoboToken(event.target.value)}
+                className='input input-bordered eink-bordered h-11 w-full rounded-lg text-sm'
+                aria-label={_('Kobo sync token (optional)')}
+                autoComplete='off'
+                placeholder={_('Token or Kobo sync URL')}
+              />
+              <span className='text-base-content/60 text-xs leading-relaxed'>
+                {_(
+                  'Enable Kobo sync in Calibre-Web, then copy the sync token or URL from your user profile. Save this login to send reading progress.',
+                )}
+              </span>
+            </label>
+          )}
 
           <div>
             {!editingLogin && (

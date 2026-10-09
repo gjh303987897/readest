@@ -22,12 +22,18 @@ export interface OpdsPublication {
   coverUrl?: string;
   format: BookFormat;
   downloadUrl: string;
+  publisher?: string;
+  published?: string;
+  categories?: string[];
+  identifier?: string;
+  detailUrl?: string;
 }
 
-interface OpdsNavigationLink {
+export interface OpdsNavigationLink {
   title: string;
   url: string;
   acquisition: boolean;
+  summary?: string;
 }
 
 export interface ParsedOpdsFeed {
@@ -81,6 +87,21 @@ const childText = (element: Element, localName: string): string | undefined => {
   return value || undefined;
 };
 
+const descriptionText = (entry: Element): string | undefined => {
+  const element = directChildren(entry, 'summary')[0] ?? directChildren(entry, 'content')[0];
+  if (!element) return undefined;
+  const type = element.getAttribute('type');
+  const text = type === 'xhtml' ? element.innerHTML : (element.textContent?.trim() ?? '');
+  if (type === 'html' || type === 'xhtml') {
+    const document = new DOMParser().parseFromString(text, 'text/html');
+    document.querySelectorAll('script,style').forEach((node) => node.remove());
+    document.querySelectorAll('br').forEach((node) => node.replaceWith('\n'));
+    document.querySelectorAll('p,div,li').forEach((node) => node.append('\n\n'));
+    return document.body.textContent?.replace(/\n{3,}/g, '\n\n').trim() || undefined;
+  }
+  return text || undefined;
+};
+
 const resolveUrl = (href: string, baseUrl: string): string => new URL(href, baseUrl).toString();
 
 const inferFormat = (type: string | null, href: string): BookFormat | undefined => {
@@ -126,16 +147,36 @@ const parsePublication = (entry: Element, baseUrl: string): OpdsPublication | nu
       return relation === `${ACQUISITION_REL.replace('/acquisition', '')}/image`;
     }) ?? links.find((link) => (link.getAttribute('rel') ?? '').includes('/image/thumbnail'));
   const coverHref = coverLink?.getAttribute('href');
+  const detailLink = links
+    .find(
+      (link) =>
+        (link.getAttribute('type') ?? '').includes('application/atom+xml') &&
+        ['alternate', 'self'].includes(link.getAttribute('rel') ?? ''),
+    )
+    ?.getAttribute('href');
 
   return {
     id: childText(entry, 'id') ?? acquisition.url,
     title,
     authors,
-    summary: childText(entry, 'summary') ?? childText(entry, 'content'),
+    summary: descriptionText(entry),
     language: childText(entry, 'language'),
     coverUrl: coverHref ? resolveUrl(coverHref, baseUrl) : undefined,
     format: acquisition.format,
     downloadUrl: acquisition.url,
+    ...(childText(entry, 'publisher') ? { publisher: childText(entry, 'publisher') } : {}),
+    ...((childText(entry, 'issued') ?? childText(entry, 'published'))
+      ? { published: childText(entry, 'issued') ?? childText(entry, 'published') }
+      : {}),
+    ...(directChildren(entry, 'category').length
+      ? {
+          categories: directChildren(entry, 'category')
+            .map((node) => node.getAttribute('label') || node.getAttribute('term') || '')
+            .filter(Boolean),
+        }
+      : {}),
+    ...(childText(entry, 'identifier') ? { identifier: childText(entry, 'identifier') } : {}),
+    ...(detailLink ? { detailUrl: resolveUrl(detailLink, baseUrl) } : {}),
   };
 };
 
@@ -152,6 +193,7 @@ export const parseOpdsFeed = (xml: string, feedUrl: string): ParsedOpdsFeed => {
     .filter((publication): publication is OpdsPublication => !!publication);
   const navigation = entries.flatMap((entry) => {
     const title = childText(entry, 'title') ?? '';
+    const isPublication = !!parsePublication(entry, feedUrl);
     return directChildren(entry, 'link').flatMap((link) => {
       const href = link.getAttribute('href');
       const relation = link.getAttribute('rel') ?? '';
@@ -174,6 +216,7 @@ export const parseOpdsFeed = (xml: string, feedUrl: string): ParsedOpdsFeed => {
       );
       if (
         !href ||
+        (isPublication && !relation.split(/\s+/).includes('subsection')) ||
         (!relation.split(/\s+/).includes('subsection') &&
           !(mediaType === 'application/atom+xml' && parameterMap.get('profile') === 'opds-catalog'))
       ) {
@@ -184,6 +227,7 @@ export const parseOpdsFeed = (xml: string, feedUrl: string): ParsedOpdsFeed => {
           title,
           url: resolveUrl(href, feedUrl),
           acquisition: parameterMap.get('kind') === 'acquisition',
+          ...(descriptionText(entry) ? { summary: descriptionText(entry) } : {}),
         },
       ];
     });
@@ -227,7 +271,7 @@ const requestHeaders = (
   return headers;
 };
 
-const defaultOpdsFetch: OpdsFetch = async (input, init) => {
+export const defaultOpdsFetch: OpdsFetch = async (input, init) => {
   if (isTauriAppPlatform()) {
     const { fetch: nativeFetch } = await import('@tauri-apps/plugin-http');
     return nativeFetch(input, init);
@@ -284,6 +328,122 @@ const fetchFeed = async (
     async (response) => parseOpdsFeed(await response.text(), response.url || url),
     signal,
   );
+
+/** Fetch one server page; browsing deliberately does not walk the entire catalog. */
+export const loadOpdsFeedPage = (
+  url: string,
+  credentials: OpdsCredentials = {},
+  signal?: AbortSignal,
+  fetcher: OpdsFetch = defaultOpdsFetch,
+) => fetchFeed(url, credentials, fetcher, signal);
+
+export const getOpdsRootUrl = (catalogUrl: string, provider: OpdsProvider): string => {
+  const url = new URL(providerCatalogUrl(catalogUrl, provider));
+  url.pathname =
+    provider === 'calibre-web'
+      ? url.pathname.replace(/\/books\/letter\/00$/, '')
+      : url.pathname.replace(/\/libraries$/, '');
+  return url.toString();
+};
+
+export const loadOpdsCover = (
+  url: string,
+  credentials: OpdsCredentials,
+  signal?: AbortSignal,
+  fetcher: OpdsFetch = defaultOpdsFetch,
+): Promise<Blob> =>
+  requestWithTimeout(url, credentials, fetcher, (response) => response.blob(), signal, 'image/*');
+
+export const loadOpdsDetails = async (
+  book: OpdsPublication,
+  credentials: OpdsCredentials,
+  signal?: AbortSignal,
+  fetcher: OpdsFetch = defaultOpdsFetch,
+): Promise<OpdsPublication> => {
+  if (!book.detailUrl) return book;
+  return requestWithTimeout(
+    book.detailUrl,
+    credentials,
+    fetcher,
+    async (response) => {
+      const document = new DOMParser().parseFromString(await response.text(), 'application/xml');
+      if (document.querySelector('parsererror'))
+        throw new Error(_('The server did not return a valid OPDS feed'));
+      const entries =
+        document.documentElement.localName === 'entry'
+          ? [document.documentElement]
+          : directChildren(document.documentElement, 'entry');
+      const entriesWithBooks = entries
+        .map((entry) => parsePublication(entry, book.detailUrl!))
+        .filter(Boolean);
+      const detailed = entriesWithBooks.find(
+        (entry) => entry?.id === book.id || entry?.downloadUrl === book.downloadUrl,
+      );
+      return detailed
+        ? {
+            ...book,
+            ...Object.fromEntries(
+              Object.entries(detailed).filter(([, value]) => value !== undefined),
+            ),
+          }
+        : book;
+    },
+    signal,
+  );
+};
+
+/** A resumable depth-first preview/page loader for navigation-only and mixed OPDS feeds. */
+export const createOpdsBrowseSession = (
+  url: string,
+  credentials: OpdsCredentials,
+  fetcher: OpdsFetch = defaultOpdsFetch,
+  initialPage?: ParsedOpdsFeed,
+) => {
+  const pending: OpdsNavigationLink[] = [{ url, title: '', acquisition: false }];
+  const visited = new Set<string>();
+  const seen = new Set<string>();
+  const buffer: OpdsPublication[] = [];
+  const origin = new URL(url).origin;
+  return {
+    async next(count: number, signal?: AbortSignal) {
+      const books: OpdsPublication[] = [];
+      // Limit each interaction's navigation work even when many folders are empty.
+      let requests = 0;
+      while (books.length < count && (buffer.length || pending.length) && requests < 8) {
+        if (signal?.aborted) throw new DOMException('Request cancelled', 'AbortError');
+        while (buffer.length && books.length < count) books.push(buffer.shift()!);
+        if (books.length >= count || !pending.length) break;
+        const link = pending.shift()!;
+        const address = new URL(link.url);
+        address.hash = '';
+        if (address.origin !== origin || visited.has(address.toString())) continue;
+        // Keep the cursor retryable if a page request fails.
+        let page: ParsedOpdsFeed;
+        try {
+          page = initialPage ?? (await fetchFeed(address.toString(), credentials, fetcher, signal));
+          initialPage = undefined;
+        } catch (error) {
+          pending.unshift(link);
+          buffer.unshift(...books);
+          throw error;
+        }
+        visited.add(address.toString());
+        requests++;
+        for (const book of page.publications) {
+          if (seen.has(book.downloadUrl)) continue;
+          seen.add(book.downloadUrl);
+          buffer.push({ ...book, summary: book.summary ?? link.summary });
+        }
+        const children = page.navigation
+          .filter((child) => child.url !== link.url)
+          .map((child) => ({ ...child, summary: child.summary ?? link.summary }));
+        pending.unshift(...children, ...(page.nextUrl ? [{ ...link, url: page.nextUrl }] : []));
+      }
+      while (buffer.length && books.length < count) books.push(buffer.shift()!);
+      return { books, hasMore: !!(buffer.length || pending.length) };
+    },
+  };
+};
 
 const findAllBooksLink = (navigation: OpdsNavigationLink[]): OpdsNavigationLink | undefined => {
   const allBooksPattern = /^all( books| publications| titles)?$/i;

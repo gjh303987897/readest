@@ -16,6 +16,7 @@ const h = vi.hoisted(() => {
   };
 
   const book = {
+    cacheOnly: false,
     hash: 'h1',
     format: 'PDF',
     metaHash: 'm1',
@@ -144,6 +145,7 @@ const flushAutoSync = async () => {
 };
 
 beforeEach(() => {
+  h.book.cacheOnly = false;
   vi.useFakeTimers();
   h.syncConfigsMock.mockClear();
   h.syncBooksMock.mockClear();
@@ -329,4 +331,19 @@ describe('useProgressSync', () => {
     // reaches the cloud before the reader tears down.
     expect(pushCallCount()).toBeGreaterThanOrEqual(1);
   });
+});
+
+test('cache-only reading never pulls or pushes progress, including manual sync', async () => {
+  h.book.cacheOnly = true;
+  const { unmount } = renderHook(() => useProgressSync('h1-view0'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60000);
+  });
+  for (const listener of h.eventListeners.get('sync-book-progress') ?? [])
+    await act(async () => {
+      listener(new CustomEvent('sync-book-progress', { detail: { bookKey: 'h1-view0' } }));
+    });
+  expect(h.syncConfigsMock).not.toHaveBeenCalled();
+  expect(h.syncBooksMock).not.toHaveBeenCalled();
+  unmount();
 });

@@ -125,6 +125,10 @@ export const useBookDataStore = create<BookDataState>((set, get) => ({
     config: BookConfig,
     settings: SystemSettings,
   ) => {
+    if (get().getBookData(bookKey)?.book?.cacheOnly) {
+      get().setConfig(bookKey, config);
+      return;
+    }
     const appService = await envConfig.getAppService();
     const { library, hashIndex, setLibrary } = useLibraryStore.getState();
     const hash = bookKey.split('-')[0]!;

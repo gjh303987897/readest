@@ -1,4 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
+import { getLocalBookFilename } from '@/utils/book';
+import { resolveBookContentSource } from '@/services/bookContent';
 import { getBookFileSize } from '@/services/bookService';
 import type { Book } from '@/types/book';
 import type { BaseDir, FileSystem } from '@/types/system';
@@ -58,4 +60,25 @@ describe('book content source resolution', () => {
     await expect(getBookFileSize(fs, book)).resolves.toBe('external content'.length);
     expect(fs.openFile).toHaveBeenCalledWith('/Users/me/Library/sample.epub', 'None');
   });
+});
+
+test('cache-only books always read their cache path even if a local copy shares their hash', async () => {
+  const book = makeBook({ cacheOnly: true, filePath: '/cache/book.epub' });
+  const fs = makeFs({
+    existing: [
+      [book.filePath!, 'None'],
+      [getLocalBookFilename(book), 'Books'],
+    ],
+  });
+  expect(await resolveBookContentSource(fs, book)).toEqual({
+    kind: 'external',
+    path: '/cache/book.epub',
+    base: 'None',
+  });
+  expect(fs.exists).not.toHaveBeenCalledWith(getLocalBookFilename(book), 'Books');
+});
+test('an expired cache never falls back to a local book with the same hash', async () => {
+  const book = makeBook({ cacheOnly: true, filePath: '/cache/missing.epub' });
+  const fs = makeFs({ existing: [[getLocalBookFilename(book), 'Books']] });
+  expect(await resolveBookContentSource(fs, book)).toEqual({ kind: 'missing' });
 });

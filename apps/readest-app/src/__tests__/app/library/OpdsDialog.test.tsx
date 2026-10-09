@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const loadOpdsPublications = vi.hoisted(() => vi.fn());
 const downloadOpdsPublication = vi.hoisted(() => vi.fn());
 
-vi.mock('@/services/opdsService', () => ({
+vi.mock('@/services/opdsService', async () => ({
+  ...(await vi.importActual<typeof import('@/services/opdsService')>('@/services/opdsService')),
   loadOpdsPublications,
   downloadOpdsPublication,
 }));
@@ -212,6 +213,10 @@ describe('OPDS catalog dialog', () => {
     await waitFor(() => expect(onImportFiles).toHaveBeenCalledTimes(1));
     expect(onImportFiles).toHaveBeenCalledWith(
       expect.arrayContaining([expect.any(File), expect.any(File)]),
+      expect.objectContaining({
+        login: expect.objectContaining({ provider: 'calibre-web' }),
+        publications: expect.any(Array),
+      }),
     );
     expect(downloadOpdsPublication).toHaveBeenCalledTimes(2);
   });
@@ -331,6 +336,28 @@ describe('editing saved OPDS logins', () => {
 
   beforeEach(() => {
     localStorage.setItem('readest-opds-logins-v1', JSON.stringify([original, other]));
+  });
+
+  it('allows adding, editing and clearing a Calibre-Web Kobo sync token', () => {
+    const props = { isOpen: true, onClose: () => {}, onImportFiles: async () => 0 };
+    const { unmount } = render(<OpdsDialog {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit saved login for My Library' }));
+    fireEvent.change(screen.getByLabelText('Kobo sync token (optional)'), {
+      target: { value: ' kobo-token ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(readLogins()[0]).toMatchObject({ koboToken: 'kobo-token' });
+    unmount();
+    render(<OpdsDialog {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit saved login for My Library' }));
+    expect((screen.getByLabelText('Kobo sync token (optional)') as HTMLInputElement).value).toBe(
+      'kobo-token',
+    );
+    fireEvent.change(screen.getByLabelText('Kobo sync token (optional)'), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(readLogins()[0]).not.toHaveProperty('koboToken');
   });
 
   it('replaces the original login when its provider, URL and credentials change, then reconnects', async () => {

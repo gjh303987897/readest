@@ -33,6 +33,9 @@ vi.mock('@/libs/storage', () => ({
 
 import { BaseAppService } from '@/services/appService';
 import { buildBookLookupIndex } from '@/services/bookService';
+import { prepareOpdsReadingBook } from '@/services/opdsReadingService';
+import { useLibraryStore } from '@/store/libraryStore';
+import type { BookConfig } from '@/types/book';
 
 // Concrete test subclass of BaseAppService with mocked fs
 class TestAppService extends BaseAppService {
@@ -144,6 +147,153 @@ describe('importBook metaHash deduplication', () => {
     fs.writeFile.mockResolvedValue(undefined);
     fs.removeDir.mockResolvedValue(undefined);
     fs.readFile.mockResolvedValue('{}');
+  });
+
+  it.each([
+    'file',
+    'metadata',
+  ])('waits for confirmation of an existing %s match before changing any data', async (match) => {
+    const old = makeBook({
+      hash: 'existing',
+      metaHash: getMetadataHash(TEST_METADATA),
+      progress: [25, 100],
+    });
+    const original = structuredClone(old);
+    mockPartialMD5.mockResolvedValue(match === 'file' ? old.hash : 'replacement');
+    setupMockBookDoc();
+    let answer!: (accepted: boolean) => void;
+    const confirmation = new Promise<boolean>((resolve) => {
+      answer = resolve;
+    });
+    const confirm = vi.fn(() => confirmation);
+    const importing = service.importBook(new File(['content'], 'test.epub'), [old], {
+      confirmExisting: confirm,
+    });
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledWith([old]));
+    expect(old).toEqual(original);
+    expect(service.getFs().writeFile).not.toHaveBeenCalled();
+    expect(service.getFs().createDir).not.toHaveBeenCalled();
+    expect(service.getFs().removeDir).not.toHaveBeenCalled();
+    answer(false);
+    expect(await importing).toBeNull();
+    expect(old).toEqual(original);
+    expect(service.getFs().writeFile).not.toHaveBeenCalled();
+    expect(service.getFs().removeDir).not.toHaveBeenCalled();
+  });
+
+  it('continues saving only after a duplicate is explicitly confirmed', async () => {
+    const old = makeBook({ hash: 'existing' });
+    mockPartialMD5.mockResolvedValue('existing');
+    setupMockBookDoc();
+    const confirm = vi.fn().mockResolvedValue(true);
+    expect(
+      await service.importBook(new File(['content'], 'test.epub'), [old], {
+        confirmExisting: confirm,
+      }),
+    ).toBe(old);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(service.getFs().createDir).toHaveBeenCalled();
+  });
+
+  it('does not ask to confirm a new file with different metadata', async () => {
+    const old = makeBook({ hash: 'existing', metaHash: 'unrelated' });
+    mockPartialMD5.mockResolvedValue('newhash');
+    setupMockBookDoc();
+    const confirm = vi.fn().mockResolvedValue(false);
+    expect(
+      await service.importBook(new File(['content'], 'test.epub'), [old], {
+        confirmExisting: confirm,
+      }),
+    ).toMatchObject({ hash: 'newhash' });
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('imports a transient cache path without creating a managed book or config', async () => {
+    mockPartialMD5.mockResolvedValue('cachedhash');
+    setupMockBookDoc();
+    service.getFs().openFile.mockResolvedValue(new File(['content'], 'cache.epub'));
+    const book = await service.importBook('/cache/cache.epub', [], {
+      transient: true,
+      saveBook: false,
+      saveCover: false,
+    });
+    expect(book?.filePath).toBe('/cache/cache.epub');
+    expect(service.getFs().createDir).not.toHaveBeenCalled();
+    expect(service.getFs().writeFile).not.toHaveBeenCalled();
+    expect(service.getFs().copyFile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'oldhash',
+    'newhash',
+  ])('persists an OPDS import over %s without stale shelf entries or lost reading records', async (previousHash) => {
+    const existing = makeBook({
+      hash: previousHash,
+      metaHash: getMetadataHash(TEST_METADATA),
+      uploadedAt: 1000,
+    });
+    const unrelated = makeBook({ hash: 'otherhash', metaHash: 'other-metadata' });
+    const config: Partial<BookConfig> = {
+      updatedAt: 1000,
+      progress: [50, 200],
+      location: 'epubcfi(/6/4!/4/2)',
+      bookmarks: [
+        {
+          id: 'bookmark',
+          location: 'epubcfi(/6/8!/4/2)',
+          title: 'Chapter 2',
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ],
+    };
+    const fs = service.getFs();
+    fs.exists.mockImplementation(async (path: string) =>
+      [previousHash, `${previousHash}/config.json`].includes(path),
+    );
+    fs.readFile.mockResolvedValue(JSON.stringify(config));
+    mockPartialMD5.mockResolvedValue('newhash');
+    setupMockBookDoc();
+    useLibraryStore.getState().setLibrary([existing, unrelated]);
+    const saveLibraryBooks = vi.fn().mockResolvedValue(undefined);
+    const envConfig = { getAppService: async () => ({ saveLibraryBooks }) };
+
+    const result = await prepareOpdsReadingBook(
+      service,
+      new File(['new version'], 'book.epub'),
+      true,
+      useLibraryStore.getState().library,
+    );
+    await useLibraryStore.getState().updateBooks(envConfig as never, result.library!);
+
+    expect(
+      useLibraryStore
+        .getState()
+        .getVisibleLibrary()
+        .map((book) => book.hash)
+        .sort(),
+    ).toEqual(['newhash', 'otherhash']);
+    expect(useLibraryStore.getState().getBookByHash('newhash')).toBe(result.book);
+    expect(saveLibraryBooks).toHaveBeenCalledWith(useLibraryStore.getState().library);
+    expect(existing.hash).toBe(previousHash);
+    expect(existing.deletedAt).toBeNull();
+    expect(useLibraryStore.getState().getBookByHash('otherhash')).toEqual(unrelated);
+
+    if (previousHash !== 'newhash') {
+      const retired = useLibraryStore.getState().getBookByHash(previousHash)!;
+      expect(retired.deletedAt).toBeGreaterThan(0);
+      expect(retired.downloadedAt).toBeNull();
+      expect(retired.uploadedAt).toBe(1000);
+      expect(fs.removeDir).toHaveBeenCalledWith(previousHash, 'Books', true);
+      const savedConfig = fs.writeFile.mock.calls.find(([path]) => path === 'newhash/config.json');
+      expect(JSON.parse(savedConfig![2] as string)).toMatchObject({
+        ...config,
+        bookHash: 'newhash',
+      });
+    } else {
+      expect(useLibraryStore.getState().library).toHaveLength(2);
+      expect(fs.removeDir).not.toHaveBeenCalled();
+    }
   });
 
   it('should detect metaHash match and override existing book with new hash', async () => {

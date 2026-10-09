@@ -185,14 +185,14 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
       const config = await appService.loadBookConfig(book, settings);
       // Load cached book navigation (TOC + section fragments) or compute and persist.
       if (book.format === 'EPUB' && bookDoc.rendition?.layout !== 'pre-paginated') {
-        const cachedNav = await appService.loadBookNav(book);
+        const cachedNav = book.cacheOnly ? null : await appService.loadBookNav(book);
         if (isBookNavCacheCurrent(cachedNav) && process.env.NODE_ENV === 'production') {
           hydrateBookNav(bookDoc, cachedNav);
         } else {
           const freshNav = await computeBookNav(bookDoc);
           hydrateBookNav(bookDoc, freshNav);
           try {
-            await appService.saveBookNav(book, freshNav);
+            if (!book.cacheOnly) await appService.saveBookNav(book, freshNav);
           } catch (e) {
             console.warn('Failed to persist book nav cache:', e);
           }
@@ -345,7 +345,7 @@ export const useReaderStore = create<ReaderStore>((set, get) => ({
     // Lightweight library update using the hash index.
     const { getBookByHash, updateBookProgress } = useLibraryStore.getState();
     const existingBook = getBookByHash(id);
-    if (existingBook) {
+    if (existingBook && !existingBook.cacheOnly) {
       updateBookProgress(id, progress);
     }
 

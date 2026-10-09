@@ -4,6 +4,7 @@ import type { EnvConfigType } from '@/services/environment';
 import { isTauriAppPlatform } from '@/services/environment';
 import { filterAccessibleBooks } from '@/services/privacyService';
 import { usePrivacyStore } from '@/store/privacyStore';
+import { useOpdsReadingCacheStore } from '@/store/opdsReadingCacheStore';
 
 interface LibraryState {
   library: Book[];
@@ -61,6 +62,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       hashIndex: buildHashIndex(library),
     }),
   getBookByHash: (hash) => {
+    const cached = useOpdsReadingCacheStore.getState().books[hash];
+    if (cached) return cached;
     const { library, hashIndex } = get();
     const index = hashIndex.get(hash);
     return index === undefined ? undefined : library[index];

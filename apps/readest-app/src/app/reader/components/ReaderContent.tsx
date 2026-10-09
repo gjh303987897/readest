@@ -29,6 +29,7 @@ import {
 import { BOOK_IDS_SEPARATOR } from '@/services/constants';
 
 import useBooksManager from '../hooks/useBooksManager';
+import { flushOpdsReadingProgress } from '../hooks/useOpdsProgressSync';
 import useBookShortcuts from '../hooks/useBookShortcuts';
 import Spinner from '@/components/Spinner';
 import SideBar from './sidebar/SideBar';
@@ -120,8 +121,10 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
     const { isPrimary } = getViewState(bookKey) || {};
     if (isPrimary && book && config) {
       const settings = useSettingsStore.getState().settings;
-      eventDispatcher.dispatch('sync-book-progress', { bookKey });
+      if (!book.cacheOnly) eventDispatcher.dispatch('sync-book-progress', { bookKey });
       await saveConfig(envConfig, bookKey, config, settings);
+      // A slow provider must not delay persisting the user's local progress.
+      await flushOpdsReadingProgress(bookKey);
     }
   };
 
@@ -164,12 +167,13 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
     const configs = bookKeys.flatMap((bookKey) => {
       const bookData = getBookData(bookKey);
       const viewState = getViewState(bookKey);
-      return viewState?.isPrimary && bookData?.book && bookData.config
+      return viewState?.isPrimary && bookData?.book && !bookData.book.cacheOnly && bookData.config
         ? [{ book: bookData.book, config: bookData.config }]
         : [];
     });
     bookKeys.forEach((bookKey) => {
-      eventDispatcher.dispatch('sync-book-progress', { bookKey });
+      if (!getBookData(bookKey)?.book?.cacheOnly)
+        eventDispatcher.dispatch('sync-book-progress', { bookKey });
       try {
         getView(bookKey)?.close();
         getView(bookKey)?.remove();

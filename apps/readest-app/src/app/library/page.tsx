@@ -53,10 +53,24 @@ import Dropdown from '@/components/Dropdown';
 import MenuItem from '@/components/MenuItem';
 import PrivacyUnlockDialog from '@/components/PrivacyUnlockDialog';
 import OpdsDialog from './components/OpdsDialog';
+import OpdsServicePicker from './components/OpdsServicePicker';
+import OpdsBrowser from './components/OpdsBrowser';
+import { useOpdsBrowserStore } from '@/store/opdsBrowserStore';
+import { useOpdsReadingCacheStore } from '@/store/opdsReadingCacheStore';
+import { prepareOpdsReadingBook, OpdsSaveCancelledError } from '@/services/opdsReadingService';
+import {
+  createOpdsProgressSource,
+  rememberOpdsProgressSource,
+} from '@/services/opdsProgressService';
+import type { SavedOpdsLogin } from '@/services/opdsLoginService';
+import OpdsOverwriteDialog from './components/OpdsOverwriteDialog';
+import { downloadOpdsPublication, type OpdsPublication } from '@/services/opdsService';
+import { useReaderStore } from '@/store/readerStore';
 import { usePrivacyStore } from '@/store/privacyStore';
 import { useBooksSync } from './hooks/useBooksSync';
 import { useBookTransferActions } from './hooks/useBookTransferActions';
 import { getBookStorageStatus } from './utils/bookStorageStatus';
+import { transferManager } from '@/services/transferManager';
 
 const progressPercent = (book: Book) => {
   const [current, total] = book.progress ?? [0, 0];
@@ -87,6 +101,24 @@ const LibraryPage = () => {
   const [isUnlockDialogOpen, setUnlockDialogOpen] = useState(false);
   const [pendingPrivacyBook, setPendingPrivacyBook] = useState<Book | null>(null);
   const [isOpdsDialogOpen, setOpdsDialogOpen] = useState(false);
+  const [isOpdsPickerOpen, setOpdsPickerOpen] = useState(false);
+  const opdsLogin = useOpdsBrowserStore((state) => state.login);
+  const opdsReading = useRef<AbortController | null>(null);
+  const [existingOpdsTitle, setExistingOpdsTitle] = useState<string | null>(null);
+  const opdsConfirmation = useRef<((accepted: boolean) => void) | null>(null);
+  useEffect(() => () => opdsConfirmation.current?.(false), []);
+  const finishOpdsConfirmation = (accepted: boolean) => {
+    opdsConfirmation.current?.(accepted);
+    opdsConfirmation.current = null;
+    setExistingOpdsTitle(null);
+  };
+  const confirmOpdsExisting = (books: Book[]) =>
+    new Promise<boolean>((resolve) => {
+      opdsConfirmation.current?.(false);
+      opdsConfirmation.current = resolve;
+      setExistingOpdsTitle(books[0]!.title);
+    });
+  useEffect(() => () => opdsReading.current?.abort(), []);
   const headerRef = useRef<HTMLElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -201,24 +233,57 @@ const LibraryPage = () => {
     }
   };
 
-  const importOpdsFiles = async (files: File[]): Promise<number> => {
+  const prepareOpdsFile = async (
+    file: File,
+    save: boolean,
+    login?: SavedOpdsLogin,
+    publication?: OpdsPublication,
+  ) => {
+    if (!appService) throw new Error(_('Unable to open book'));
+    let existingHashes: string[] = [];
+    const result = await prepareOpdsReadingBook(
+      appService,
+      file,
+      save,
+      useLibraryStore.getState().library,
+      useReaderStore.getState().bookKeys.map((key) => key.split('-')[0]!),
+      async (books) => {
+        existingHashes = books.map((book) => book.hash);
+        return confirmOpdsExisting(books);
+      },
+    );
+    if (result.library) await updateBooks(envConfig, result.library);
+    if (login && publication)
+      rememberOpdsProgressSource(
+        result.book,
+        createOpdsProgressSource(login, publication),
+        existingHashes,
+      );
+    return result.book;
+  };
+
+  const importOpdsFiles = async (
+    files: File[],
+    context?: { login: SavedOpdsLogin; publications: OpdsPublication[] },
+  ): Promise<number> => {
     if (!appService || files.length === 0) return 0;
     const imported: Book[] = [];
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
       try {
-        const book = await ingestFile(
-          { file, books: [...useLibraryStore.getState().library, ...imported] },
-          { appService, settings, isLoggedIn: !!user },
+        const book = await prepareOpdsFile(
+          file,
+          true,
+          context?.login,
+          context?.publications[index],
         );
+        if (user && !book.uploadedAt) transferManager.queueUpload(book);
         if (book) imported.push(book);
       } catch (error) {
+        if (error instanceof OpdsSaveCancelledError) continue;
         console.error('Failed to import OPDS book', error);
       }
     }
 
-    if (imported.length > 0) {
-      await updateBooks(envConfig, imported);
-    }
     return imported.length;
   };
 
@@ -250,9 +315,35 @@ const LibraryPage = () => {
         notifyError(_('Book file is not available'));
         return;
       }
+      if (useOpdsReadingCacheStore.getState().books[book.hash]) {
+        useOpdsReadingCacheStore.getState().forget(book.hash);
+        clearBookData(book.hash);
+      }
       navigateToReader(router, [book.hash]);
     } finally {
       setBusyBookHash(null);
+    }
+  };
+
+  const readOpdsBook = async (publication: OpdsPublication, save: boolean) => {
+    if (!appService || !opdsLogin || opdsReading.current) return;
+    const controller = new AbortController();
+    opdsReading.current = controller;
+    try {
+      const sameServer = new URL(publication.downloadUrl).origin === new URL(opdsLogin.url).origin;
+      const file = await downloadOpdsPublication(
+        publication,
+        sameServer ? { username: opdsLogin.username, password: opdsLogin.password } : {},
+        undefined,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      const book = await prepareOpdsFile(file, save, opdsLogin, publication);
+      if (controller.signal.aborted) return;
+      clearBookData(book.hash);
+      navigateToReader(router, [book.hash]);
+    } finally {
+      opdsReading.current = null;
     }
   };
 
@@ -373,6 +464,7 @@ const LibraryPage = () => {
         <div
           className={clsx(
             'exclude-title-bar-mousedown pointer-events-none relative z-40 ms-auto flex h-9 min-w-9 max-w-md flex-1 justify-end',
+            opdsLogin && 'invisible',
             isSearchExpanded &&
               'max-sm:absolute max-sm:start-4 max-sm:top-1/2 max-sm:-translate-y-1/2',
             isSearchExpanded && (showWindowControls ? 'max-sm:end-36' : 'max-sm:end-4'),
@@ -421,7 +513,7 @@ const LibraryPage = () => {
               aria-label={_('Search Books')}
               aria-hidden={!isSearchExpanded}
               tabIndex={isSearchExpanded ? 0 : -1}
-              disabled={!isSearchExpanded}
+              disabled={!isSearchExpanded || !!opdsLogin}
               placeholder={_('Search Books')}
             />
             {isSearchExpanded && (
@@ -499,6 +591,8 @@ const LibraryPage = () => {
                 transient
                 label={_('OPDS View Mode')}
                 Icon={<LibraryBig className='h-4 w-4' />}
+                disabled={importing || !appService}
+                onClick={() => setOpdsPickerOpen(true)}
               />
             </ul>
           </Dropdown>
@@ -537,6 +631,8 @@ const LibraryPage = () => {
             <Spinner loading />
           )}
         </div>
+      ) : opdsLogin ? (
+        <OpdsBrowser onChooseService={() => setOpdsPickerOpen(true)} onRead={readOpdsBook} />
       ) : visibleBooks.length === 0 ? (
         <div className='flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center'>
           <BookOpen className='h-10 w-10 opacity-40' />
@@ -706,11 +802,32 @@ const LibraryPage = () => {
         </section>
       )}
       {isSettingsDialogOpen && <SettingsDialog bookKey='' initialPanel='General' />}
+      {existingOpdsTitle !== null && (
+        <OpdsOverwriteDialog
+          title={existingOpdsTitle}
+          onCancel={() => finishOpdsConfirmation(false)}
+          onConfirm={() => finishOpdsConfirmation(true)}
+        />
+      )}
       <OpdsDialog
         isOpen={isOpdsDialogOpen}
         onClose={() => setOpdsDialogOpen(false)}
         onImportFiles={importOpdsFiles}
       />
+      {isOpdsPickerOpen && (
+        <OpdsServicePicker
+          onClose={() => setOpdsPickerOpen(false)}
+          onSelect={(login) => {
+            useOpdsBrowserStore.getState().select(login);
+            setOpdsPickerOpen(false);
+            closeSearch();
+          }}
+          onManage={() => {
+            setOpdsPickerOpen(false);
+            setOpdsDialogOpen(true);
+          }}
+        />
+      )}
       <PrivacyUnlockDialog
         isOpen={isUnlockDialogOpen}
         requirePin={!!pendingPrivacyBook}

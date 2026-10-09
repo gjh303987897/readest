@@ -332,6 +332,7 @@ export async function importBook(
     inPlace = false,
     lookupIndex,
     osPlatform,
+    confirmExisting,
   } = options;
   let loadedBook: BookDoc | undefined;
   let fileobj: File | undefined;
@@ -428,6 +429,16 @@ export async function importBook(
     let existingBook = lookupIndex
       ? lookupIndex.byHash.get(hash)
       : books.find((b) => b.hash === hash);
+    // Ask after inspecting the actual file, before reviving, merging or
+    // re-keying records and before writing any book files or configurations.
+    if (!transient && confirmExisting) {
+      const duplicates = books.filter(
+        (b) =>
+          !b.deletedAt &&
+          (b.hash === hash || (metaHash && b.metaHash === metaHash && b.format === format)),
+      );
+      if (duplicates.length && !(await confirmExisting(duplicates))) return null;
+    }
     let metaHashMatch = false;
     let oldBookDir: string | undefined;
     if (existingBook) {
@@ -515,7 +526,7 @@ export async function importBook(
     // create above races two concurrent imports of the same book — on Windows
     // the loser fails with "Cannot create a file when that file already exists"
     // (Sentry READEST-H). create_dir_all is a no-op when the dir exists.
-    await fs.createDir(getDir(book), 'Books', true);
+    if (!transient) await fs.createDir(getDir(book), 'Books', true);
     const bookFilename = getLocalBookFilename(book);
     const willWriteBookFile =
       saveBook &&
@@ -562,7 +573,7 @@ export async function importBook(
     if (existingBook) existingBook.coverHash = coverHash;
     // Never overwrite the config file only when it's not existed
     if (!existingBook) {
-      await saveBookConfigFn(book, INIT_BOOK_CONFIG);
+      if (!transient) await saveBookConfigFn(book, INIT_BOOK_CONFIG);
       books.push(book);
       if (lookupIndex) {
         lookupIndex.byHash.set(book.hash, book);
@@ -737,7 +748,7 @@ export async function loadBookConfig(
   };
   try {
     let str = '{}';
-    if (await fs.exists(getConfigFilename(book), 'Books')) {
+    if (!book.cacheOnly && (await fs.exists(getConfigFilename(book), 'Books'))) {
       str = (await fs.readFile(getConfigFilename(book), 'Books', 'text')) as string;
     }
     return deserializeConfig(str, globalViewSettings, DEFAULT_BOOK_SEARCH_CONFIG);
@@ -752,6 +763,7 @@ export async function saveBookConfig(
   config: BookConfig,
   settings?: SystemSettings,
 ): Promise<void> {
+  if (book.cacheOnly) return;
   let serializedConfig: string;
   if (settings) {
     const globalViewSettings = {

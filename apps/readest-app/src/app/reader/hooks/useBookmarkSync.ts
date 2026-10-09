@@ -24,11 +24,13 @@ const sameBookmarks = (left: BookBookmark[], right: BookBookmark[]) =>
   JSON.stringify(left) === JSON.stringify(right);
 
 export const useBookmarkSync = (bookKey: string) => {
-  const { user } = useAuth();
+  const { user: authenticatedUser } = useAuth();
   const { envConfig } = useEnv();
   const { syncClient } = useSyncContext();
   const settings = useSettingsStore((state) => state.settings);
   const bookId = bookKey.split('-')[0]!;
+  const cacheOnly = useBookDataStore((state) => state.booksData[bookId]?.book?.cacheOnly);
+  const user = cacheOnly ? null : authenticatedUser;
   const storedBookmarks = useBookDataStore(
     (state) => state.booksData[bookId]?.config?.bookmarks ?? EMPTY_BOOKMARKS,
   );
@@ -65,7 +67,7 @@ export const useBookmarkSync = (bookKey: string) => {
   const pushLatestBookmarks = useCallback(async () => {
     const book = getBookData(bookKey)?.book;
     const config = getConfig(bookKey);
-    if (!user || !book || !config) return;
+    if (!user || !book || book.cacheOnly || !config) return;
 
     const bookmarks = config.bookmarks ?? EMPTY_BOOKMARKS;
     const response = await syncClient.pushChanges({
@@ -99,6 +101,7 @@ export const useBookmarkSync = (bookKey: string) => {
 
   const pullAndReconcile = useCallback(async () => {
     const book = getBookData(bookKey)?.book;
+    if (book?.cacheOnly) return true;
     if (!user || !book) return false;
 
     const response = await syncClient.pullChanges(0, 'notes', book.hash, book.metaHash);

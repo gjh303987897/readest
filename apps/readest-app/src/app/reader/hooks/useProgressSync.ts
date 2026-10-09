@@ -50,7 +50,7 @@ export const useProgressSync = (bookKey: string) => {
 
   const pushConfig = async (bookKey: string, config: BookConfig | null) => {
     const book = getBookData(bookKey)?.book;
-    if (!config || !book || !user) return;
+    if (!config || !book || book.cacheOnly || !user) return;
     const bookHash = book.hash;
     const metaHash = book.metaHash;
     const progressConfig: BookConfig = {
@@ -70,7 +70,7 @@ export const useProgressSync = (bookKey: string) => {
 
   const pullConfig = async (bookKey: string) => {
     const book = getBookData(bookKey)?.book;
-    if (!user || !book) return;
+    if (!user || !book || book.cacheOnly) return;
     const bookHash = bookKey.split('-')[0]!;
     const metaHash = book.metaHash;
     await syncConfigs([], bookHash, metaHash, 'pull');
@@ -84,6 +84,7 @@ export const useProgressSync = (bookKey: string) => {
   // user's auto-push isn't blocked by a server outage. Re-entry while a
   // pull is in flight or a retry timer is pending is a no-op.
   const pullWithRetry = useCallback(async () => {
+    if (getBookData(bookKey)?.book?.cacheOnly) return;
     if (configPulled.current) return;
     if (pullInFlight.current) return;
     if (pullRetryTimer.current !== null) return;
@@ -111,6 +112,7 @@ export const useProgressSync = (bookKey: string) => {
   }, [bookKey]);
 
   const syncConfig = async () => {
+    if (getBookData(bookKey)?.book?.cacheOnly) return;
     if (!configPulled.current) {
       pullWithRetry();
     } else {
@@ -184,7 +186,7 @@ export const useProgressSync = (bookKey: string) => {
   const applyRemoteProgress = async (syncedConfigs: BookConfig[]) => {
     const config = getConfig(bookKey);
     const book = getBookData(bookKey)?.book;
-    if (!syncedConfigs || syncedConfigs.length === 0 || !config || !book) return;
+    if (!syncedConfigs || syncedConfigs.length === 0 || !config || !book || book.cacheOnly) return;
 
     const bookHash = bookKey.split('-')[0]!;
     const metaHash = book.metaHash;

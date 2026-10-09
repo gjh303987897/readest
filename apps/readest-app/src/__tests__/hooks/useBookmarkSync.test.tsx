@@ -32,6 +32,7 @@ const h = vi.hoisted(() => {
     },
   };
   return {
+    cacheOnly: false,
     localBookmark,
     remoteNote,
     state,
@@ -67,8 +68,17 @@ vi.mock('@/store/settingsStore', () => ({
 
 vi.mock('@/store/bookDataStore', () => {
   const store = {
-    booksData: { 'hash-1': { config: h.state.config } },
-    getBookData: () => ({ book: { hash: 'hash-1', metaHash: 'meta-1' } }),
+    booksData: {
+      'hash-1': {
+        config: h.state.config,
+        book: {
+          get cacheOnly() {
+            return h.cacheOnly;
+          },
+        },
+      },
+    },
+    getBookData: () => ({ book: { hash: 'hash-1', metaHash: 'meta-1', cacheOnly: h.cacheOnly } }),
     getConfig: () => h.state.config,
     setConfig: h.setConfig,
     saveConfig: h.saveConfig,
@@ -94,6 +104,7 @@ vi.mock('@/utils/event', () => ({
 import { useBookmarkSync } from '@/app/reader/hooks/useBookmarkSync';
 
 beforeEach(() => {
+  h.cacheOnly = false;
   h.state.config.bookmarks = [h.localBookmark];
   h.pullChanges.mockReset().mockResolvedValue({ books: [], configs: [], notes: [h.remoteNote] });
   h.pushChanges.mockReset().mockResolvedValue({ books: [], configs: [], notes: [] });
@@ -127,4 +138,14 @@ describe('useBookmarkSync', () => {
       ]),
     });
   });
+});
+
+it('cache-only reading never synchronizes bookmarks', async () => {
+  h.cacheOnly = true;
+  const { unmount } = renderHook(() => useBookmarkSync('hash-1-view0'));
+  await Promise.resolve();
+  expect(h.pullChanges).not.toHaveBeenCalled();
+  expect(h.pushChanges).not.toHaveBeenCalled();
+  unmount();
+  expect(h.pushChanges).not.toHaveBeenCalled();
 });

@@ -39,6 +39,8 @@ export interface BookLookupIndex {
  * that are bound by the AppService instance.
  */
 export interface ImportBookOptions {
+  /** Ask before deduplication can modify an existing book or its reading data. */
+  confirmExisting?: (books: Book[]) => Promise<boolean>;
   /** Whether to copy the file into the Books directory. Defaults to true. */
   saveBook?: boolean;
   /** Whether to extract and save a cover image. Defaults to true. */
@@ -61,6 +63,8 @@ export interface ImportBookOptions {
 }
 
 export interface Book {
+  /** OPDS session cache; never added to the persistent or synced library. */
+  cacheOnly?: boolean;
   // if Book is a remote book we just lazy load the book content via url
   url?: string;
   // if Book is a transient local book we can load the book content via filePath

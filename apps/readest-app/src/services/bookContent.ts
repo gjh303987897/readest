@@ -40,6 +40,11 @@ export async function resolveBookContentSource(
   fs: FileSystem,
   book: Book,
 ): Promise<BookContentSource> {
+  if (book.cacheOnly) {
+    return book.filePath && (await fs.exists(book.filePath, 'None'))
+      ? { kind: 'external', path: book.filePath, base: 'None' }
+      : { kind: 'missing' };
+  }
   // Prefer the managed copy when it exists; book.filePath is device-local and
   // can outlive a prior in-place/import mode.
   const managedPath = getLocalBookFilename(book);
