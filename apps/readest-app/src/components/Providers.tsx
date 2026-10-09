@@ -40,6 +40,17 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
   useSettingsSync();
 
   useEffect(() => {
+    if (process.env.NODE_ENV !== 'development') return;
+    // Public locale files do not participate in Next.js Fast Refresh.
+    const refreshTranslations = () => {
+      if (i18n.isInitialized) void i18n.reloadResources(i18n.languages);
+    };
+    refreshTranslations();
+    window.addEventListener('focus', refreshTranslations);
+    return () => window.removeEventListener('focus', refreshTranslations);
+  }, []);
+
+  useEffect(() => {
     const cleanupPrivacyStore = initializePrivacyStore();
     const unsubscribe = usePrivacyStore.subscribe((state, previous) => {
       const cloudLockActivated = state.isCloudUnlockRequired && !previous.isCloudUnlockRequired;

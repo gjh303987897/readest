@@ -45,6 +45,9 @@ const initI18n = async () => {
       ...(isBrowser && {
         backend: {
           loadPath: '/locales/{{lng}}/{{ns}}.json',
+          ...(process.env.NODE_ENV === 'development' && {
+            requestOptions: { cache: 'no-store' },
+          }),
         },
       }),
       detection: {
@@ -58,6 +61,7 @@ const initI18n = async () => {
       },
       react: {
         useSuspense: false,
+        bindI18n: 'languageChanged loaded',
       },
     });
 
