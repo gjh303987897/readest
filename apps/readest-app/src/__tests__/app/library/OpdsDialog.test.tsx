@@ -70,7 +70,57 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+const selectProvider = (name: 'Calibre-Web' | 'Kavita') => {
+  fireEvent.click(screen.getByRole('combobox', { name: 'OPDS provider' }));
+  fireEvent.click(screen.getByRole('option', { name }));
+};
+
 describe('OPDS catalog dialog', () => {
+  it('selects providers with the keyboard without submitting the login form', () => {
+    render(<OpdsDialog isOpen onClose={() => {}} onImportFiles={async () => 0} />);
+    const picker = screen.getByRole('combobox', { name: 'OPDS provider' });
+    picker.focus();
+    fireEvent.keyDown(picker, { key: 'ArrowDown' });
+    expect(screen.getAllByRole('option')).toHaveLength(2);
+    fireEvent.keyDown(picker, { key: 'End' });
+    expect((picker as HTMLButtonElement).value).toBe('');
+    fireEvent.keyDown(picker, { key: 'Enter' });
+    expect((picker as HTMLButtonElement).value).toBe('kavita');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(document.activeElement).toBe(picker);
+    expect(loadOpdsPublications).not.toHaveBeenCalled();
+    fireEvent.click(picker);
+    expect(screen.getByRole('option', { name: 'Kavita' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+  });
+
+  it('dismisses unconfirmed provider changes with Escape, outside click and Tab', () => {
+    const onClose = vi.fn();
+    render(<OpdsDialog isOpen onClose={onClose} onImportFiles={async () => 0} />);
+    selectProvider('Calibre-Web');
+    const picker = screen.getByRole('combobox', { name: 'OPDS provider' });
+    fireEvent.click(picker);
+    fireEvent.keyDown(picker, { key: 'ArrowDown' });
+    const escapeEvent = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(picker, escapeEvent);
+    expect(escapeEvent.defaultPrevented).toBe(true);
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect((picker as HTMLButtonElement).value).toBe('calibre-web');
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(picker);
+    fireEvent.pointerDown(screen.getByLabelText('Catalog URL'));
+    expect(screen.queryByRole('listbox')).toBeNull();
+    fireEvent.click(picker);
+    fireEvent.keyDown(picker, { key: 'Tab' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect((picker as HTMLButtonElement).value).toBe('calibre-web');
+  });
+
   it('requires manual provider selection before connecting', () => {
     render(<OpdsDialog isOpen onClose={() => {}} onImportFiles={async () => 0} />);
     fireEvent.change(screen.getByLabelText('Catalog URL'), {
@@ -86,7 +136,7 @@ describe('OPDS catalog dialog', () => {
     const props = { isOpen: true, onClose: () => {}, onImportFiles: async () => 0 };
     const { unmount } = render(<OpdsDialog {...props} />);
     const url = 'https://books.example.com/api/opds/user-key';
-    fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'kavita' } });
+    selectProvider('Kavita');
     fireEvent.change(screen.getByLabelText('Catalog URL'), { target: { value: url } });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Save login' }));
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
@@ -118,7 +168,7 @@ describe('OPDS catalog dialog', () => {
     expect(loadOpdsPublications).not.toHaveBeenCalled();
     expect((screen.getByLabelText('Username') as HTMLInputElement).value).toBe('alice');
     expect((screen.getByLabelText('Password') as HTMLInputElement).value).toBe('secret');
-    fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'calibre-web' } });
+    selectProvider('Calibre-Web');
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
     await screen.findByText('First Book');
     expect(JSON.parse(localStorage.getItem('readest-opds-logins-v1')!)).toEqual([
@@ -131,7 +181,7 @@ describe('OPDS catalog dialog', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog.querySelector('form')?.classList.contains('view-switch-enter')).toBe(true);
 
-    fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'calibre-web' } });
+    selectProvider('Calibre-Web');
     fireEvent.change(screen.getByLabelText('Catalog URL'), {
       target: { value: 'https://books.example.com/opds' },
     });
@@ -147,7 +197,7 @@ describe('OPDS catalog dialog', () => {
     const onImportFiles = vi.fn(async (files: File[]) => files.length);
     render(<OpdsDialog isOpen onClose={() => {}} onImportFiles={onImportFiles} />);
 
-    fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'calibre-web' } });
+    selectProvider('Calibre-Web');
     fireEvent.change(screen.getByLabelText('Catalog URL'), {
       target: { value: 'https://books.example.com/opds' },
     });
@@ -170,7 +220,7 @@ describe('OPDS catalog dialog', () => {
     const props = { isOpen: true, onClose: () => {}, onImportFiles: async () => 0 };
     const { unmount } = render(<OpdsDialog {...props} />);
 
-    fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'calibre-web' } });
+    selectProvider('Calibre-Web');
     fireEvent.change(screen.getByLabelText('Catalog URL'), {
       target: { value: 'https://books.example.com/opds' },
     });
@@ -202,7 +252,7 @@ describe('OPDS catalog dialog', () => {
     loadOpdsPublications.mockRejectedValueOnce(new Error('OPDS authentication failed'));
     const { unmount } = render(<OpdsDialog {...props} />);
 
-    fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'calibre-web' } });
+    selectProvider('Calibre-Web');
     fireEvent.change(screen.getByLabelText('Catalog URL'), {
       target: { value: 'https://books.example.com/opds' },
     });
@@ -224,7 +274,7 @@ describe('OPDS catalog dialog', () => {
   it('updates the password for an existing catalog and username', async () => {
     const props = { isOpen: true, onClose: () => {}, onImportFiles: async () => 0 };
     const first = render(<OpdsDialog {...props} />);
-    fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'calibre-web' } });
+    selectProvider('Calibre-Web');
     fireEvent.change(screen.getByLabelText('Catalog URL'), {
       target: { value: 'https://books.example.com/opds' },
     });
@@ -236,7 +286,7 @@ describe('OPDS catalog dialog', () => {
     first.unmount();
 
     const second = render(<OpdsDialog {...props} />);
-    fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'calibre-web' } });
+    selectProvider('Calibre-Web');
     fireEvent.change(screen.getByLabelText('Catalog URL'), {
       target: { value: 'https://books.example.com/opds' },
     });
@@ -287,13 +337,13 @@ describe('editing saved OPDS logins', () => {
     const props = { isOpen: true, onClose: () => {}, onImportFiles: async () => 0 };
     const { unmount } = render(<OpdsDialog {...props} />);
     fireEvent.click(screen.getByRole('button', { name: 'Edit saved login for My Library' }));
-    expect((screen.getByLabelText('OPDS provider') as HTMLSelectElement).value).toBe('calibre-web');
+    expect((screen.getByLabelText('OPDS provider') as HTMLButtonElement).value).toBe('calibre-web');
     expect((screen.getByLabelText('Catalog URL') as HTMLInputElement).value).toBe(original.url);
     expect((screen.getByLabelText('Username') as HTMLInputElement).value).toBe('alice');
     expect((screen.getByLabelText('Password') as HTMLInputElement).value).toBe('old-password');
 
     const url = 'https://new.example.com/api/opds/new-key';
-    fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'kavita' } });
+    selectProvider('Kavita');
     fireEvent.change(screen.getByLabelText('Catalog URL'), { target: { value: url } });
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: ' bob ' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'new-password' } });
@@ -379,7 +429,7 @@ describe('editing saved OPDS logins', () => {
     expect(
       (screen.getByRole('button', { name: 'Save Changes' }) as HTMLButtonElement).disabled,
     ).toBe(true);
-    fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'calibre-web' } });
+    selectProvider('Calibre-Web');
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
     expect(readLogins()).toEqual([original, other]);
     expect(loadOpdsPublications).not.toHaveBeenCalled();
@@ -400,7 +450,7 @@ describe('editing saved OPDS logins', () => {
 it('recovers from failed OPDS persistence and leaves retry available', async () => {
   const importFiles = vi.fn().mockRejectedValue(new Error('disk full'));
   render(<OpdsDialog isOpen onClose={() => {}} onImportFiles={importFiles} />);
-  fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'calibre-web' } });
+  selectProvider('Calibre-Web');
   fireEvent.change(screen.getByLabelText('Catalog URL'), {
     target: { value: 'https://books.example.com/opds' },
   });
@@ -420,7 +470,7 @@ it('reports all download failures without attempting an empty import', async () 
     .mockRejectedValueOnce(new Error('offline'));
   const importFiles = vi.fn();
   render(<OpdsDialog isOpen onClose={() => {}} onImportFiles={importFiles} />);
-  fireEvent.change(screen.getByLabelText('OPDS provider'), { target: { value: 'calibre-web' } });
+  selectProvider('Calibre-Web');
   fireEvent.change(screen.getByLabelText('Catalog URL'), {
     target: { value: 'https://books.example.com/opds' },
   });

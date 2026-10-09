@@ -3,10 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookText,
-  ChevronDown,
   ChevronLeft,
   Download,
-  LibraryBig,
   LoaderCircle,
   Pencil,
   Save,
@@ -17,6 +15,7 @@ import {
 } from 'lucide-react';
 
 import Dialog from '@/components/Dialog';
+import OpdsProviderSelect from './OpdsProviderSelect';
 import { useTranslation } from '@/hooks/useTranslation';
 import {
   downloadOpdsPublication,
@@ -80,7 +79,7 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
   const [saveLogin, setSaveLogin] = useState(false);
   const [savedLogins, setSavedLogins] = useState<SavedOpdsLogin[]>(readSavedLogins);
   const [editingLogin, setEditingLogin] = useState<SavedOpdsLogin | null>(null);
-  const providerInput = useRef<HTMLSelectElement | null>(null);
+  const providerInput = useRef<HTMLButtonElement | null>(null);
   const [catalog, setCatalog] = useState<OpdsCatalog | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
@@ -393,40 +392,15 @@ const OpdsDialog: React.FC<OpdsDialogProps> = ({ isOpen, onClose, onImportFiles 
           className='view-switch-enter mx-auto flex w-full max-w-lg flex-col gap-4 px-1 py-4'
           onSubmit={handleSubmit}
         >
-          <label className='flex flex-col gap-1.5'>
+          <div className='flex flex-col gap-1.5'>
             <span className='text-sm font-medium'>{_('OPDS provider')}</span>
-            <div
-              className={`eink-bordered border-base-300 bg-base-100 relative flex h-11 items-center rounded-lg border transition-colors duration-150 focus-within:ring-2 focus-within:ring-base-content/15 ${loading ? 'opacity-50' : 'hover:border-base-content/30'}`}
-            >
-              <LibraryBig
-                aria-hidden='true'
-                className='pointer-events-none absolute start-3 h-4 w-4 opacity-60'
-              />
-              <select
-                ref={providerInput}
-                required
-                value={provider}
-                disabled={loading}
-                onChange={(event) => setProvider(event.target.value as OpdsProvider | '')}
-                className={`h-full w-full min-w-0 cursor-pointer appearance-none rounded-lg bg-transparent pe-10 ps-9 text-sm outline-none disabled:cursor-not-allowed ${provider ? 'text-base-content font-medium' : 'text-base-content/60'}`}
-                aria-label={_('OPDS provider')}
-              >
-                <option value='' disabled className='bg-base-100 text-base-content/60'>
-                  {_('Select an OPDS provider')}
-                </option>
-                <option value='calibre-web' className='bg-base-100 text-base-content'>
-                  Calibre-Web
-                </option>
-                <option value='kavita' className='bg-base-100 text-base-content'>
-                  Kavita
-                </option>
-              </select>
-              <ChevronDown
-                aria-hidden='true'
-                className='pointer-events-none absolute end-3 h-4 w-4 opacity-60'
-              />
-            </div>
-          </label>
+            <OpdsProviderSelect
+              value={provider}
+              onChange={setProvider}
+              disabled={loading}
+              buttonRef={providerInput}
+            />
+          </div>
           <label className='flex flex-col gap-1.5'>
             <span className='text-sm font-medium'>{_('Catalog URL')}</span>
             <div className='eink-bordered border-base-300 bg-base-100 flex h-11 items-center gap-2 rounded-lg border px-3 focus-within:ring-2 focus-within:ring-base-content/15'>
