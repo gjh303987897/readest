@@ -345,12 +345,54 @@ jobs:
         run: |
           rm -rf src-tauri/gen/android
           pnpm tauri android init --ci
+          # Give the standalone buildSrc preflight its own settings boundary.
+          touch src-tauri/gen/android/buildSrc/settings.gradle.kts
+          # Cover both buildSrc and the APK project; buildSrc has its own repositories.
+          # Use Maven Central's alternate official hostname only for Protobuf.
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const repositories = [
+            'mavenCentral()',
+            'maven {',
+            '    url = uri("https://repo1.maven.org/maven2/")',
+            '    content { includeGroup("com.google.protobuf") }',
+            '}',
+          ];
+          for (const file of [
+            'src-tauri/gen/android/build.gradle.kts',
+            'src-tauri/gen/android/buildSrc/build.gradle.kts',
+          ]) {
+            const source = readFileSync(file, 'utf8');
+            const pattern = /^([ \t]*)mavenCentral\(\)/gm;
+            if (!pattern.test(source)) throw new Error(`Missing Maven Central repository in ${file}`);
+            writeFileSync(file, source.replace(pattern, (_, indent) =>
+              repositories.map(line => indent + line).join('\n')));
+          }
+          NODE
           cat >> src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties <<'EOF'
           networkTimeout=60000
           retries=3
           retryBackOffMs=2000
           EOF
           src-tauri/gen/android/gradlew --version
+
+      - name: Resolve Android build dependencies
+        working-directory: apps/readest-app
+        run: |
+          # Build buildSrc without configuring the APK project or compiling Rust.
+          # Refresh cached missing artifacts on every retry, before the expensive build.
+          for attempt in 1 2 3; do
+            if src-tauri/gen/android/gradlew --project-dir src-tauri/gen/android/buildSrc \
+              --refresh-dependencies --console=plain assemble; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Android build dependency resolution failed after 3 attempts."
+              exit 1
+            fi
+            echo "::warning::Android build dependency attempt $attempt failed; retrying."
+            sleep $((15 * attempt))
+          done
 
       - name: Build optimized release APK
         working-directory: apps/readest-app
