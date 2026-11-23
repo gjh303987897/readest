@@ -18,9 +18,10 @@ const createReaderWindow = (appService: AppService, url: string) => {
     resizable: true,
     title: appService.isMacOSApp ? '' : 'readest-tiny',
     decorations: !!appService.isMacOSApp,
-    // Linux stays opaque: a transparent WebKitGTK window turns invisible when
-    // its web process is busy (#3682). macOS uses native decorations instead.
+    // Preserve native macOS decorations and Linux opacity. A custom WebView
+    // background lets the macOS appearance bridge expose native material.
     transparent: !appService.isMacOSApp && !appService.isLinuxApp,
+    backgroundColor: appService.isMacOSApp ? '#323130' : undefined,
     shadow: appService.isMacOSApp ? undefined : true,
     titleBarStyle: appService.isMacOSApp ? 'overlay' : undefined,
     // Enum ScrollBarStyle is exported as type by tauri, so it cannot be used directly.
@@ -80,9 +81,9 @@ export const ensureMainLibraryWindow = async (appService: AppService) => {
     resizable: true,
     title: appService.isMacOSApp ? '' : 'readest-tiny',
     decorations: !!appService.isMacOSApp,
-    // Linux stays opaque: a transparent WebKitGTK window turns invisible when
-    // its web process is busy (#3682). macOS uses native decorations instead.
+    // Match the primary window's macOS material and Linux opacity.
     transparent: !appService.isMacOSApp && !appService.isLinuxApp,
+    backgroundColor: appService.isMacOSApp ? '#323130' : undefined,
     shadow: appService.isMacOSApp ? undefined : true,
     titleBarStyle: appService.isMacOSApp ? 'overlay' : undefined,
     scrollBarStyle: (appService.osPlatform === 'windows'

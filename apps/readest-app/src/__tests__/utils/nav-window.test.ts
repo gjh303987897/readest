@@ -36,8 +36,8 @@ const makeAppService = (os: 'macos' | 'windows' | 'linux'): AppService =>
 
 // Regression (#3682): reader/extra windows opened via nav.ts must also be
 // opaque on Linux — a transparent WebKitGTK window goes invisible when the web
-// process is busy. Only macOS (native decorations) stays non-transparent by
-// design; Windows keeps its existing behavior.
+// process is busy. macOS exposes its native material while retaining native
+// decorations; Windows keeps its existing behavior.
 describe('nav.ts window transparency', () => {
   beforeEach(() => {
     webviewWindowCtor.mockClear();
@@ -50,9 +50,12 @@ describe('nav.ts window transparency', () => {
     expect(options['transparent']).toBe(false);
   });
 
-  test('macOS reader window is not transparent (native decorations)', () => {
+  test('macOS reader window exposes native glass and retains system decorations', () => {
     showReaderWindow(makeAppService('macos'), ['book-1']);
     const options = webviewWindowCtor.mock.calls[0]![1] as Record<string, unknown>;
     expect(options['transparent']).toBe(false);
+    expect(options['backgroundColor']).toBe('#323130');
+    expect(options['decorations']).toBe(true);
+    expect(options['titleBarStyle']).toBe('overlay');
   });
 });

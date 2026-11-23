@@ -69,8 +69,8 @@ async function loadServiceWithOS(os: 'macos' | 'windows' | 'linux' | 'ios' | 'an
 // process is busy (e.g. during a library backup) fails to repaint damaged
 // regions on interaction, so the whole window composites as transparent — the
 // app "turns invisible". The window is now opaque, which means it can no longer
-// present a rounded, transparent frame, so `hasRoundedWindow` must be false on
-// every desktop platform.
+// present a custom rounded frame. macOS also leaves its corners to native
+// decorations; its glass transparency is independent of this CSS-corner flag.
 describe('NativeAppService rounded-window capability', () => {
   test('Linux does not use a rounded (transparent) window', async () => {
     const service = await loadServiceWithOS('linux');
@@ -78,7 +78,7 @@ describe('NativeAppService rounded-window capability', () => {
     expect(service.hasRoundedWindow).toBe(false);
   });
 
-  test('macOS does not use a rounded (transparent) window', async () => {
+  test('macOS leaves rounded corners to its native decorations', async () => {
     const service = await loadServiceWithOS('macos');
     expect(service.hasRoundedWindow).toBe(false);
   });

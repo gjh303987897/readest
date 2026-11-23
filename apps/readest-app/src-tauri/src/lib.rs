@@ -256,6 +256,8 @@ pub fn run() {
             mobi_parser::extract_mobi_cover_full,
             #[cfg(target_os = "macos")]
             macos::traffic_light::set_traffic_lights,
+            #[cfg(target_os = "macos")]
+            macos::glass::configure_macos_glass,
         ])
         .manage(melotts::MeloTtsState::default())
         .plugin(tauri_plugin_fs::init())
@@ -488,7 +490,10 @@ pub fn run() {
             }
 
             #[cfg(target_os = "macos")]
-            macos::menu::setup_macos_menu(app.handle())?;
+            {
+                macos::menu::setup_macos_menu(app.handle())?;
+                macos::glass::observe_accessibility(app.handle());
+            }
 
             app.handle().emit("window-ready", ()).unwrap();
 

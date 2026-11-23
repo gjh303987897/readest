@@ -30,6 +30,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useLibrary } from '@/hooks/useLibrary';
 import { useTheme } from '@/hooks/useTheme';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useTrafficLight } from '@/hooks/useTrafficLight';
 import { useFileSelector } from '@/hooks/useFileSelector';
 import { useTransferQueue } from '@/hooks/useTransferQueue';
 import { useAppRouter } from '@/hooks/useAppRouter';
@@ -120,6 +121,7 @@ const LibraryPage = () => {
     });
   useEffect(() => () => opdsReading.current?.abort(), []);
   const headerRef = useRef<HTMLElement>(null);
+  const { isTrafficLightVisible } = useTrafficLight(headerRef);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const showWindowControls = !!appService?.hasWindowBar && !appService.hasTrafficLight;
@@ -447,16 +449,17 @@ const LibraryPage = () => {
   };
 
   return (
-    <main className='bg-base-100 text-base-content full-height flex min-h-0 flex-col'>
+    <main className='library-main bg-base-100 text-base-content full-height flex min-h-0 flex-col'>
       <header
         ref={headerRef}
         className={clsx(
-          'border-base-300 relative flex min-h-16 shrink-0 select-none items-center gap-2 border-b ps-4 sm:gap-3 sm:ps-6',
+          'library-header border-base-300 relative flex min-h-16 shrink-0 select-none items-center gap-2 border-b ps-4 sm:gap-3 sm:ps-6',
+          isTrafficLightVisible && '!pl-[88px]',
           showWindowControls ? 'pe-36 sm:pe-40' : 'pe-4 sm:pe-6',
         )}
         style={{ marginTop: `${topInset}px` }}
       >
-        <div className='flex min-w-0 items-center gap-2'>
+        <div className='library-title flex min-w-0 items-center gap-2'>
           <BookOpen aria-hidden='true' className='h-5 w-5 shrink-0' />
           <h1 className='truncate text-lg font-semibold'>readest-tiny</h1>
         </div>
@@ -465,9 +468,12 @@ const LibraryPage = () => {
           className={clsx(
             'exclude-title-bar-mousedown pointer-events-none relative z-40 ms-auto flex h-9 min-w-9 max-w-md flex-1 justify-end',
             opdsLogin && 'invisible',
+            isSearchExpanded && 'max-sm:absolute max-sm:top-1/2 max-sm:-translate-y-1/2',
             isSearchExpanded &&
-              'max-sm:absolute max-sm:start-4 max-sm:top-1/2 max-sm:-translate-y-1/2',
-            isSearchExpanded && (showWindowControls ? 'max-sm:end-36' : 'max-sm:end-4'),
+              (isTrafficLightVisible ? 'max-sm:left-[88px] max-sm:right-4' : 'max-sm:start-4'),
+            isSearchExpanded &&
+              !isTrafficLightVisible &&
+              (showWindowControls ? 'max-sm:end-36' : 'max-sm:end-4'),
           )}
         >
           <div
@@ -530,7 +536,7 @@ const LibraryPage = () => {
           </div>
         </div>
 
-        <div className='exclude-title-bar-mousedown flex shrink-0 items-center gap-1 sm:gap-2'>
+        <div className='macos-toolbar-group exclude-title-bar-mousedown flex shrink-0 items-center gap-1 sm:gap-2'>
           {hasPin && (
             <button
               type='button'
@@ -609,198 +615,203 @@ const LibraryPage = () => {
             <Settings className='h-4 w-4' />
           </button>
         </div>
-        {showWindowControls && (
+        {appService?.hasWindowBar && (
           <WindowButtons
             className='absolute end-4 top-1/2 z-30 -translate-y-1/2 sm:end-6'
             headerRef={headerRef}
+            showMinimize={showWindowControls}
+            showMaximize={showWindowControls}
+            showClose={showWindowControls}
           />
         )}
       </header>
 
-      {!libraryLoaded ? (
-        <div className='flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center'>
-          {libraryError ? (
-            <>
-              <p role='alert'>{_('Failed to load library')}</p>
-              <p className='text-base-content/60 text-sm'>{libraryError}</p>
-              <button className='btn btn-contrast' onClick={retryLibrary}>
-                {_('Retry')}
-              </button>
-            </>
-          ) : (
-            <Spinner loading />
-          )}
-        </div>
-      ) : opdsLogin ? (
-        <OpdsBrowser onChooseService={() => setOpdsPickerOpen(true)} onRead={readOpdsBook} />
-      ) : visibleBooks.length === 0 ? (
-        <div className='flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center'>
-          <BookOpen className='h-10 w-10 opacity-40' />
-          <p className='text-base-content/70 text-sm'>
-            {query ? _('No books found') : _('Your library is empty')}
-          </p>
-          {!query && (
-            <div className='flex flex-wrap items-center justify-center gap-2'>
-              <button className='btn btn-primary btn-sm' onClick={() => void handleImport()}>
-                <Upload className='h-4 w-4' />
-                {_('Import Books')}
-              </button>
-              <button className='btn btn-ghost btn-sm' onClick={() => setOpdsDialogOpen(true)}>
-                <LibraryBig className='h-4 w-4' />
-                {_('From OPDS Catalog')}
-              </button>
-            </div>
-          )}
-        </div>
-      ) : (
-        <section
-          className='grid min-h-0 flex-1 auto-rows-max grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-x-5 gap-y-7 overflow-y-auto p-4 sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] sm:p-6'
-          aria-label={_('Your Bookshelf')}
-        >
-          {visibleBooks.map((book) => {
-            const percent = progressPercent(book);
-            const busy = busyBookHash === book.hash;
-            const isPrivate = hiddenBookHashes.includes(book.hash);
-            const isDownloading =
-              downloadingBookHashes.has(book.hash) ||
-              (busy && !!book.uploadedAt && !book.downloadedAt);
-            const storageStatus = getBookStorageStatus(book, isDownloading);
-            const storageLabel =
-              storageStatus === 'syncing'
-                ? _('Syncing from cloud')
-                : storageStatus === 'local'
-                  ? book.uploadedAt
-                    ? _('Stored locally and backed up')
-                    : _('Stored locally')
-                  : _('Stored in cloud');
-            return (
-              <article key={book.hash} className='group min-w-0'>
-                <button
-                  type='button'
-                  className='bg-base-200 relative block aspect-[28/41] w-full overflow-hidden rounded shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary'
-                  onClick={() => void handleOpen(book)}
-                  aria-label={_('Open {{title}}', { title: book.title })}
-                  disabled={busy}
-                >
-                  <BookCover book={book} coverFit='crop' />
-                  {isPrivate && (
-                    <span
-                      className='bg-base-100/90 eink-bordered absolute end-2 top-2 flex h-7 w-7 items-center justify-center rounded-full'
-                      title={_('Hidden in Privacy Mode')}
-                      aria-hidden='true'
-                    >
-                      <Lock className='h-3.5 w-3.5' />
-                    </span>
-                  )}
-                  {busy && (
-                    <span className='bg-base-100/70 absolute inset-0 flex items-center justify-center'>
-                      <LoaderCircle className='h-5 w-5 animate-spin' />
-                    </span>
-                  )}
+      <div className='library-content bg-base-100 flex min-h-0 flex-1 flex-col'>
+        {!libraryLoaded ? (
+          <div className='flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center'>
+            {libraryError ? (
+              <>
+                <p role='alert'>{_('Failed to load library')}</p>
+                <p className='text-base-content/60 text-sm'>{libraryError}</p>
+                <button className='btn btn-contrast' onClick={retryLibrary}>
+                  {_('Retry')}
                 </button>
-
-                <div className='mt-2 min-w-0'>
-                  <h2 className='truncate text-sm font-semibold' title={book.title}>
-                    {book.title}
-                  </h2>
-                  <p className='text-base-content/60 truncate text-xs'>
-                    {formatAuthors(book.author, book.primaryLanguage) || book.format}
-                  </p>
-                  <div className='mt-2 h-1 w-full overflow-hidden rounded bg-base-300'>
-                    <div className='bg-primary h-full' style={{ width: `${percent}%` }} />
-                  </div>
-                  <div className='mt-1 flex h-8 items-center justify-between'>
-                    <div className='text-base-content/60 flex min-w-0 items-center gap-2 text-xs'>
-                      <span>{percent}%</span>
+              </>
+            ) : (
+              <Spinner loading />
+            )}
+          </div>
+        ) : opdsLogin ? (
+          <OpdsBrowser onChooseService={() => setOpdsPickerOpen(true)} onRead={readOpdsBook} />
+        ) : visibleBooks.length === 0 ? (
+          <div className='flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center'>
+            <BookOpen className='h-10 w-10 opacity-40' />
+            <p className='text-base-content/70 text-sm'>
+              {query ? _('No books found') : _('Your library is empty')}
+            </p>
+            {!query && (
+              <div className='flex flex-wrap items-center justify-center gap-2'>
+                <button className='btn btn-primary btn-sm' onClick={() => void handleImport()}>
+                  <Upload className='h-4 w-4' />
+                  {_('Import Books')}
+                </button>
+                <button className='btn btn-ghost btn-sm' onClick={() => setOpdsDialogOpen(true)}>
+                  <LibraryBig className='h-4 w-4' />
+                  {_('From OPDS Catalog')}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <section
+            className='grid min-h-0 flex-1 auto-rows-max grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-x-5 gap-y-7 overflow-y-auto p-4 sm:grid-cols-[repeat(auto-fill,minmax(152px,1fr))] sm:p-6'
+            aria-label={_('Your Bookshelf')}
+          >
+            {visibleBooks.map((book) => {
+              const percent = progressPercent(book);
+              const busy = busyBookHash === book.hash;
+              const isPrivate = hiddenBookHashes.includes(book.hash);
+              const isDownloading =
+                downloadingBookHashes.has(book.hash) ||
+                (busy && !!book.uploadedAt && !book.downloadedAt);
+              const storageStatus = getBookStorageStatus(book, isDownloading);
+              const storageLabel =
+                storageStatus === 'syncing'
+                  ? _('Syncing from cloud')
+                  : storageStatus === 'local'
+                    ? book.uploadedAt
+                      ? _('Stored locally and backed up')
+                      : _('Stored locally')
+                    : _('Stored in cloud');
+              return (
+                <article key={book.hash} className='group min-w-0'>
+                  <button
+                    type='button'
+                    className='bg-base-200 relative block aspect-[28/41] w-full overflow-hidden rounded shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                    onClick={() => void handleOpen(book)}
+                    aria-label={_('Open {{title}}', { title: book.title })}
+                    disabled={busy}
+                  >
+                    <BookCover book={book} coverFit='crop' />
+                    {isPrivate && (
                       <span
-                        className='flex h-5 w-5 shrink-0 items-center justify-center'
-                        title={storageLabel}
-                        aria-label={storageLabel}
-                        role='img'
+                        className='bg-base-100/90 eink-bordered absolute end-2 top-2 flex h-7 w-7 items-center justify-center rounded-full'
+                        title={_('Hidden in Privacy Mode')}
+                        aria-hidden='true'
                       >
-                        {storageStatus === 'syncing' ? (
-                          <LoaderCircle className='h-3.5 w-3.5 animate-spin' />
-                        ) : storageStatus === 'local' ? (
-                          <HardDrive className='h-3.5 w-3.5' />
-                        ) : (
-                          <Cloud className='h-3.5 w-3.5' />
-                        )}
+                        <Lock className='h-3.5 w-3.5' />
                       </span>
+                    )}
+                    {busy && (
+                      <span className='bg-base-100/70 absolute inset-0 flex items-center justify-center'>
+                        <LoaderCircle className='h-5 w-5 animate-spin' />
+                      </span>
+                    )}
+                  </button>
+
+                  <div className='mt-2 min-w-0'>
+                    <h2 className='truncate text-sm font-semibold' title={book.title}>
+                      {book.title}
+                    </h2>
+                    <p className='text-base-content/60 truncate text-xs'>
+                      {formatAuthors(book.author, book.primaryLanguage) || book.format}
+                    </p>
+                    <div className='mt-2 h-1 w-full overflow-hidden rounded bg-base-300'>
+                      <div className='bg-primary h-full' style={{ width: `${percent}%` }} />
                     </div>
-                    <div className='flex items-center gap-1'>
-                      {(!book.uploadedAt || !book.downloadedAt) && (
-                        <button
-                          type='button'
-                          className='btn btn-ghost btn-square h-7 min-h-7 w-7'
-                          title={
-                            !user
-                              ? _('Log In')
-                              : !book.uploadedAt
-                                ? _('Upload Book')
-                                : _('Download Book')
-                          }
-                          aria-label={
-                            !user
-                              ? _('Log In')
-                              : !book.uploadedAt
-                                ? _('Upload Book')
-                                : _('Download Book')
-                          }
-                          onClick={() => void handleCloudAction(book)}
+                    <div className='mt-1 flex h-8 items-center justify-between'>
+                      <div className='text-base-content/60 flex min-w-0 items-center gap-2 text-xs'>
+                        <span>{percent}%</span>
+                        <span
+                          className='flex h-5 w-5 shrink-0 items-center justify-center'
+                          title={storageLabel}
+                          aria-label={storageLabel}
+                          role='img'
+                        >
+                          {storageStatus === 'syncing' ? (
+                            <LoaderCircle className='h-3.5 w-3.5 animate-spin' />
+                          ) : storageStatus === 'local' ? (
+                            <HardDrive className='h-3.5 w-3.5' />
+                          ) : (
+                            <Cloud className='h-3.5 w-3.5' />
+                          )}
+                        </span>
+                      </div>
+                      <div className='flex items-center gap-1'>
+                        {(!book.uploadedAt || !book.downloadedAt) && (
+                          <button
+                            type='button'
+                            className='btn btn-ghost btn-square h-7 min-h-7 w-7'
+                            title={
+                              !user
+                                ? _('Log In')
+                                : !book.uploadedAt
+                                  ? _('Upload Book')
+                                  : _('Download Book')
+                            }
+                            aria-label={
+                              !user
+                                ? _('Log In')
+                                : !book.uploadedAt
+                                  ? _('Upload Book')
+                                  : _('Download Book')
+                            }
+                            onClick={() => void handleCloudAction(book)}
+                            disabled={busy}
+                          >
+                            {!book.uploadedAt ? (
+                              <CloudUpload className='h-4 w-4' />
+                            ) : (
+                              <CloudDownload className='h-4 w-4' />
+                            )}
+                          </button>
+                        )}
+                        <Dropdown
+                          label={_('Book Actions')}
+                          className='dropdown-end'
+                          buttonClassName='btn btn-ghost btn-square h-7 min-h-7 w-7'
+                          toggleButton={<MoreVertical className='h-4 w-4' />}
                           disabled={busy}
                         >
-                          {!book.uploadedAt ? (
-                            <CloudUpload className='h-4 w-4' />
-                          ) : (
-                            <CloudDownload className='h-4 w-4' />
-                          )}
-                        </button>
-                      )}
-                      <Dropdown
-                        label={_('Book Actions')}
-                        className='dropdown-end'
-                        buttonClassName='btn btn-ghost btn-square h-7 min-h-7 w-7'
-                        toggleButton={<MoreVertical className='h-4 w-4' />}
-                        disabled={busy}
-                      >
-                        <ul className='menu dropdown-content bg-base-100 eink-bordered z-50 w-56 rounded-lg border p-2 shadow'>
-                          {book.uploadedAt && book.downloadedAt && (
+                          <ul className='menu dropdown-content bg-base-100 eink-bordered z-50 w-56 rounded-lg border p-2 shadow'>
+                            {book.uploadedAt && book.downloadedAt && (
+                              <MenuItem
+                                transient
+                                label={_('Remove Local Copy')}
+                                Icon={<HardDrive className='h-4 w-4' />}
+                                onClick={() => void handleRemoveLocalCopy(book)}
+                              />
+                            )}
                             <MenuItem
                               transient
-                              label={_('Remove Local Copy')}
-                              Icon={<HardDrive className='h-4 w-4' />}
-                              onClick={() => void handleRemoveLocalCopy(book)}
+                              label={_('Delete Book')}
+                              labelClass='text-error'
+                              Icon={<Trash2 className='text-error h-4 w-4' />}
+                              onClick={() => void handleDelete(book)}
                             />
-                          )}
-                          <MenuItem
-                            transient
-                            label={_('Delete Book')}
-                            labelClass='text-error'
-                            Icon={<Trash2 className='text-error h-4 w-4' />}
-                            onClick={() => void handleDelete(book)}
-                          />
-                          {hasPin && isUnlocked && (
-                            <MenuItem
-                              transient
-                              label={
-                                isPrivate
-                                  ? _('Remove from Privacy Mode')
-                                  : _('Hide in Privacy Mode')
-                              }
-                              Icon={<Lock className='h-4 w-4' />}
-                              onClick={() => void handlePrivacyToggle(book)}
-                            />
-                          )}
-                        </ul>
-                      </Dropdown>
+                            {hasPin && isUnlocked && (
+                              <MenuItem
+                                transient
+                                label={
+                                  isPrivate
+                                    ? _('Remove from Privacy Mode')
+                                    : _('Hide in Privacy Mode')
+                                }
+                                Icon={<Lock className='h-4 w-4' />}
+                                onClick={() => void handlePrivacyToggle(book)}
+                              />
+                            )}
+                          </ul>
+                        </Dropdown>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </article>
-            );
-          })}
-        </section>
-      )}
+                </article>
+              );
+            })}
+          </section>
+        )}
+      </div>
       {isSettingsDialogOpen && <SettingsDialog bookKey='' initialPanel='General' />}
       {existingOpdsTitle !== null && (
         <OpdsOverwriteDialog

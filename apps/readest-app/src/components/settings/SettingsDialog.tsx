@@ -90,7 +90,7 @@ const SettingsDialog: React.FC<{ bookKey: string; initialPanel?: SettingsPanelTy
       className={clsx('modal-open !z-[110]', isDesktopLayout && '!items-center')}
       bgClassName={bookKey ? 'sm:!bg-black/20' : 'sm:!bg-black/50'}
       boxClassName={clsx(
-        'overflow-hidden not-eink:bg-base-200',
+        'macos-settings overflow-hidden not-eink:bg-base-200',
         isDesktopLayout && '!h-[80%] !max-h-[680px] !w-[90%] !max-w-[720px] !rounded-2xl',
         appService?.isMobile && 'sm:w-3/4 sm:max-w-[90%]',
       )}

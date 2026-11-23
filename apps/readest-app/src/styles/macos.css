@@ -1,0 +1,180 @@
+/*
+ * macOS chrome follows Apple's Liquid Glass material hierarchy.
+ * Native AppKit glass hosts the WebView. HTML content stays opaque;
+ * local WebView overlays use a regular, legible translucent material.
+ * See docs/macos-liquid-glass.md for scope and the Apple references.
+ */
+html[data-platform='macos'] {
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  --macos-material: color-mix(in srgb, var(--fallback-b1, oklch(var(--b1))) 86%, transparent);
+  --macos-material-border: color-mix(in srgb, currentColor 14%, transparent);
+  --macos-material-shadow: 0 4px 18px rgb(0 0 0 / 8%), 0 1px 3px rgb(0 0 0 / 5%);
+}
+
+/* The root material is exposed only in the library's navigation region. */
+html[data-platform='macos'][data-macos-material='liquid'][data-page='library']:not(
+  [data-eink='true']
+),
+html[data-platform='macos'][data-macos-material='liquid']:not([data-eink='true']) .library-main {
+  background: transparent;
+}
+
+html[data-platform='macos']:not([data-eink='true']) .library-header {
+  min-height: 64px;
+  gap: 16px;
+  border-bottom-color: var(--macos-material-border);
+  background: var(--macos-material);
+}
+
+html[data-platform='macos'][data-macos-material='liquid']:not([data-eink='true']) .library-header {
+  background: transparent;
+}
+
+html[data-platform='macos']:not([data-eink='true']) .library-title h1 {
+  font-size: 14px;
+  letter-spacing: -0.015em;
+}
+
+html[data-platform='macos']:not([data-eink='true']) .library-content {
+  /* Never let the desktop or native material alter book covers or reading content. */
+  position: relative;
+  isolation: isolate;
+}
+
+html[data-platform='macos']:not([data-eink='true']) .library-search,
+html[data-platform='macos']:not([data-eink='true']) .macos-toolbar-group {
+  border-radius: 999px;
+}
+
+html[data-platform='macos']:not([data-eink='true']) .macos-toolbar-group .btn,
+html[data-platform='macos']:not([data-eink='true']) .macos-toolbar-group .window-button {
+  border-radius: 999px;
+}
+
+html[data-platform='macos']:not([data-eink='true']) .library-header .macos-toolbar-group {
+  min-height: 40px;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--macos-material-border);
+  background: color-mix(in srgb, var(--fallback-b1, oklch(var(--b1))) 30%, transparent);
+}
+
+/* Keep the bar itself clear so controls form distinct functional groups. */
+html[data-platform='macos']:not([data-eink='true']) .reader-chrome,
+html[data-platform='macos']:not([data-eink='true']) .reader-chrome .header-bar,
+html[data-platform='macos']:not([data-eink='true']) .reader-chrome .header-title {
+  background: transparent;
+  box-shadow: none;
+}
+
+html[data-platform='macos']:not([data-eink='true']) .reader-chrome .macos-toolbar-group {
+  height: 36px;
+  padding-inline: 8px;
+  gap: 8px;
+  background: var(--macos-material);
+  border: 1px solid var(--macos-material-border);
+  box-shadow: var(--macos-material-shadow);
+  -webkit-backdrop-filter: blur(20px) saturate(1.25);
+  backdrop-filter: blur(20px) saturate(1.25);
+}
+
+html[data-platform='macos']:not([data-eink='true']) .reader-chrome .header-tools-start > div {
+  gap: 12px;
+}
+
+html[data-platform='macos']:not([data-eink='true']) .reader-chrome .header-title > div {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--macos-material);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+
+@media (max-width: 900px) {
+  html[data-platform='macos'] .reader-chrome .header-title {
+    display: none;
+  }
+}
+
+html[data-platform='macos']:not([data-eink='true']) .macos-sidebar {
+  background: var(--macos-material);
+  border-inline-end: 1px solid var(--macos-material-border);
+  -webkit-backdrop-filter: blur(24px) saturate(1.15);
+  backdrop-filter: blur(24px) saturate(1.15);
+}
+
+html[data-platform='macos']:not([data-eink='true']) .macos-settings {
+  /* Forms are content: retain a solid surface beneath their controls. */
+  border: 1px solid var(--macos-material-border);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 20%);
+}
+
+html[data-platform='macos']:not([data-eink='true']) .macos-toolbar-group :focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+html[data-platform='macos'][data-window-focused='false'] {
+  --macos-material-shadow: 0 1px 4px rgb(0 0 0 / 4%);
+}
+
+/* Opaque fallback also covers native IPC failure and older system engines. */
+html[data-platform='macos'][data-macos-material='solid'] {
+  --macos-material: var(--fallback-b1, oklch(var(--b1)));
+  --macos-material-shadow: none;
+}
+
+html[data-platform='macos'][data-increase-contrast='true'] {
+  --macos-material-border: currentColor;
+}
+
+html[data-platform='macos'][data-macos-material='solid'] .macos-toolbar-group,
+html[data-platform='macos'][data-macos-material='solid'] .header-title > div,
+html[data-platform='macos'][data-macos-material='solid'] .macos-sidebar {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  html[data-platform='macos'] {
+    --macos-material: var(--fallback-b1, oklch(var(--b1)));
+    --macos-material-shadow: none;
+  }
+
+  html[data-platform='macos'] .macos-toolbar-group,
+  html[data-platform='macos'] .header-title > div,
+  html[data-platform='macos'] .macos-sidebar {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  html[data-platform='macos']:not([data-eink='true']) .library-header {
+    background: var(--macos-material) !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  html[data-platform='macos'] {
+    --macos-material-border: currentColor;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html[data-platform='macos'] {
+    --macos-material: var(--fallback-b1, oklch(var(--b1)));
+  }
+}
+
+html[data-platform='macos'][data-reduce-motion='true'] .reader-chrome *,
+html[data-platform='macos'][data-reduce-motion='true'] .library-header * {
+  transition: none !important;
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-platform='macos'] .reader-chrome *,
+  html[data-platform='macos'] .library-header * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

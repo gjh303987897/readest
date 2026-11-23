@@ -19,6 +19,7 @@ import { useSettingsSync } from '@/hooks/useSettingsSync';
 import { usePrivacySync } from '@/hooks/usePrivacySync';
 import { useDefaultIconSize } from '@/hooks/useResponsiveSize';
 import { useEinkMode } from '@/hooks/useEinkMode';
+import { useMacOSAppearance } from '@/hooks/useMacOSAppearance';
 import { getLocale } from '@/utils/misc';
 import { getDirFromUILanguage } from '@/utils/rtl';
 import { getAndroidPatchedViewportContent } from '@/utils/viewport';
@@ -38,6 +39,7 @@ const Providers = ({ children }: { children: React.ReactNode }) => {
 
   useSafeAreaInsets();
   useSettingsSync();
+  useMacOSAppearance();
 
   useEffect(() => {
     if (process.env.NODE_ENV !== 'development') return;

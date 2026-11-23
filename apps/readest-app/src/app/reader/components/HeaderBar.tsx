@@ -73,17 +73,19 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   useEffect(() => {
     if (!appService?.hasTrafficLight) return;
 
-    if (hoveredBookKey === bookKey && isTopLeft) {
+    let hideTimeout: ReturnType<typeof setTimeout> | undefined;
+    if ((hoveredBookKey === bookKey || isDropdownOpen || isBookmarkDialogOpen) && isTopLeft) {
       setTrafficLightVisibility(true);
     } else if (!hoveredBookKey) {
-      setTimeout(() => {
+      hideTimeout = setTimeout(() => {
         if (!getIsSideBarVisible()) {
           setTrafficLightVisibility(false);
         }
       }, 100);
     }
+    return () => clearTimeout(hideTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appService, hoveredBookKey]);
+  }, [appService, hoveredBookKey, isDropdownOpen, isBookmarkDialogOpen]);
 
   useEffect(() => {
     const header = headerRef.current;
@@ -119,7 +121,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   return (
     <div
       className={clsx(
-        'left-0 top-0 w-full',
+        'reader-chrome left-0 top-0 w-full',
         isHeaderVisible && 'bg-base-100',
         window.innerWidth < 640 ? 'fixed z-20' : 'absolute',
       )}
@@ -181,7 +183,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
           }
         }}
       >
-        <div className='header-tools-start bg-base-100 sidebar-bookmark-toggler z-20 flex h-full min-w-0 items-center gap-x-4 pe-2 max-[350px]:gap-x-2'>
+        <div className='macos-toolbar-group header-tools-start bg-base-100 sidebar-bookmark-toggler z-20 flex h-full min-w-0 items-center gap-x-4 pe-2 max-[350px]:gap-x-2'>
           {/* h-full so this scroller spans the whole bar: `overflow-x-auto`
               also clips vertically, and shrink-wrapped to the 32px icons it
               cut the buttons' touch halos back down to 32px (#5401). */}
@@ -227,7 +229,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
           </div>
         </div>
 
-        <div className='header-tools-end bg-base-100 z-20 ms-auto flex h-full min-w-max items-center gap-x-4 ps-2 max-[350px]:gap-x-2'>
+        <div className='macos-toolbar-group header-tools-end bg-base-100 z-20 ms-auto flex h-full min-w-max items-center gap-x-4 ps-2 max-[350px]:gap-x-2'>
           {!isHeaderCompact && <SettingsToggler bookKey={bookKey} />}
           <Dropdown
             label={_('View Options')}

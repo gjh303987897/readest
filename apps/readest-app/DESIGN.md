@@ -4,6 +4,10 @@ Readest's UI is **Adwaita-aligned**, **e-ink-first**, **cross-platform-aware**. 
 reference for that language: principles, vocabulary, anti-patterns. New work should read it
 before reaching for daisyui defaults; existing work is gradually migrating toward it.
 
+On macOS, navigation and reading controls adopt a dedicated Liquid Glass treatment.
+Content retains the shared reading design. See [macOS Liquid Glass](docs/macos-liquid-glass.md)
+for material hierarchy, accessibility behavior, implementation boundaries, and Apple references.
+
 ### Status
 
 This doc is the **first articulation** of the system, not a retrospective. Many existing

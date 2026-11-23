@@ -181,12 +181,13 @@ const WindowButtons: React.FC<WindowButtonsProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!isTauriAppPlatform() || !appService?.hasWindowBar) return;
+    if (!isTauriAppPlatform() || !appService?.hasWindowBar || !showMaximize) return;
 
     let disposed = false;
     let unlisten: (() => void) | undefined;
 
     void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
+      if (disposed) return;
       const currentWindow = getCurrentWindow();
       const updateMaximizedState = async () => {
         const maximized = await currentWindow.isMaximized();
@@ -194,14 +195,17 @@ const WindowButtons: React.FC<WindowButtonsProps> = ({
       };
 
       await updateMaximizedState();
-      unlisten = await currentWindow.onResized(() => void updateMaximizedState());
+      if (disposed) return;
+      const cleanup = await currentWindow.onResized(() => void updateMaximizedState());
+      if (disposed) cleanup();
+      else unlisten = cleanup;
     });
 
     return () => {
       disposed = true;
       unlisten?.();
     };
-  }, [appService?.hasWindowBar]);
+  }, [appService?.hasWindowBar, showMaximize]);
 
   const handleMinimize = async () => {
     if (onMinimize) {

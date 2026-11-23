@@ -1,8 +1,4 @@
-use std::{
-    env, fs,
-    path::PathBuf,
-    process::Command,
-};
+use std::{env, fs, path::PathBuf, process::Command};
 
 fn main() {
     println!("cargo:rerun-if-changed=../extensions/windows-thumbnail/src");
@@ -35,6 +31,7 @@ fn main() {
             "parse_mobi_metadata",
             "extract_mobi_cover_full",
             "set_traffic_lights",
+            "configure_macos_glass",
         ]),
     ))
     .expect("failed to run tauri-build");

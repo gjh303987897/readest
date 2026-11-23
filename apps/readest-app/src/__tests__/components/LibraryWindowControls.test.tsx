@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const libraryState = vi.hoisted(() => ({ loaded: false }));
+const libraryState = vi.hoisted(() => ({ loaded: false, hasTrafficLight: false }));
 
 vi.mock('@/hooks/useTranslation', () => ({
   useTranslation: () => (value: string) => value,
@@ -10,7 +10,7 @@ vi.mock('@/hooks/useTranslation', () => ({
 vi.mock('@/context/EnvContext', () => ({
   useEnv: () => ({
     envConfig: {},
-    appService: { hasWindowBar: true },
+    appService: { hasWindowBar: true, hasTrafficLight: libraryState.hasTrafficLight },
   }),
 }));
 
@@ -23,6 +23,9 @@ vi.mock('@/hooks/useLibrary', () => ({
 }));
 
 vi.mock('@/hooks/useTheme', () => ({ useTheme: vi.fn() }));
+vi.mock('@/hooks/useTrafficLight', () => ({
+  useTrafficLight: () => ({ isTrafficLightVisible: libraryState.hasTrafficLight }),
+}));
 vi.mock('@/hooks/useTransferQueue', () => ({ useTransferQueue: vi.fn() }));
 vi.mock('@/hooks/useAppRouter', () => ({ useAppRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/hooks/useFileSelector', () => ({
@@ -63,6 +66,7 @@ import { eventDispatcher } from '@/utils/event';
 
 beforeEach(() => {
   libraryState.loaded = false;
+  libraryState.hasTrafficLight = false;
   localStorage.clear();
   usePrivacyStore.setState(usePrivacyStore.getInitialState());
   useLibraryStore.setState({ library: [], visibleLibrary: [], checkOpenWithBooks: false });
@@ -162,6 +166,21 @@ describe('Library privacy actions', () => {
 });
 
 describe('Library window controls', () => {
+  it('reserves the native macOS buttons and retains the header drag component', () => {
+    libraryState.hasTrafficLight = true;
+    const { container } = render(<LibraryPage />);
+    expect(container.querySelector('header')?.className).toContain('!pl-[88px]');
+    expect(screen.queryByRole('button', { name: 'Minimize' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Maximize or Restore' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
+    expect(container.querySelector('.window-buttons')).toBeTruthy();
+    expect(container.querySelector('.library-content')?.className).toContain('bg-base-100');
+    fireEvent.click(screen.getByRole('button', { name: 'Search Books' }));
+    expect(container.querySelector('#library-search-input')?.closest('.z-40')?.className).toContain(
+      'max-sm:left-[88px]',
+    );
+  });
+
   it('renders the desktop minimize, maximize, and close buttons in the library header', () => {
     render(<LibraryPage />);
 
